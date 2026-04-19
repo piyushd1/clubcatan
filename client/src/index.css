@@ -87,3 +87,8 @@
 .fade-in { animation: fadeIn 0.3s ease-out; }
 .pulse { animation: pulse 2s ease-in-out infinite; }
 .glow { animation: glow 2s ease-in-out infinite; }
+
+/* Hide scrollbars on horizontally-scrolling rows (ResourceHUD, etc.) — pure
+   aesthetic; scrolling still works via touch + keyboard. */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

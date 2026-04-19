@@ -27,6 +27,9 @@ export default {
           DEFAULT: '#1a1c18',
           variant: '#44473f',
         },
+        'on-primary': '#ffffff',
+        'on-secondary': '#ffffff',
+        'on-tertiary': '#ffffff',
         outline: {
           DEFAULT: '#74796f',
           variant: '#c4c8bd',
