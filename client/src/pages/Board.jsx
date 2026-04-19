@@ -170,6 +170,8 @@ export function Board({ roomCode, playerId, client, onLeave }) {
     await doMoveRobber(hexKey, playerIdOrNull);
   };
 
+  const winner = phase === 'finished' ? players[game?.winner] : null;
+
   return (
     <main className="relative flex min-h-dvh flex-col bg-surface pb-[calc(88px+env(safe-area-inset-bottom))]">
       <header className="sticky top-0 z-30 bg-surface/80 backdrop-blur-xl supports-[not(backdrop-filter:blur(0))]:bg-surface/96 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-3">
@@ -252,6 +254,15 @@ export function Board({ roomCode, playerId, client, onLeave }) {
             </div>
           </Card>
         </ModalOverlay>
+      ) : null}
+
+      {phase === 'finished' ? (
+        <GameOverOverlay
+          winner={winner}
+          players={players}
+          myPlayerId={playerId}
+          onLeave={onLeave}
+        />
       ) : null}
 
       {myDiscardInfo && me ? (
@@ -404,6 +415,44 @@ function TabPanel({ tab, onClose }) {
           <p className="text-sm text-on-surface-variant">{copy.hint}</p>
         </Card>
       </div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------- Game-over overlay ------------------------------------------
+
+function GameOverOverlay({ winner, players, myPlayerId, onLeave }) {
+  const ranked = useMemo(
+    () => [...(players ?? [])].sort((a, b) => (b.victoryPoints ?? 0) - (a.victoryPoints ?? 0)),
+    [players]
+  );
+  const iWon = winner?.id === myPlayerId;
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/60 backdrop-blur-sm px-4">
+      <Card tone="surface" className="w-full max-w-md flex flex-col gap-4 text-center">
+        <p className="text-xs font-bold uppercase tracking-[0.3em] text-on-surface/50">Expedition Concluded</p>
+        <h2 className="text-4xl font-extrabold tracking-display text-primary">
+          {winner ? (iWon ? 'You Won' : `${winner.name} won`) : 'The game has ended'}
+        </h2>
+        <div className="flex flex-col gap-1 text-left">
+          {ranked.map((p, i) => (
+            <div key={p.id} className="flex items-center justify-between rounded-md bg-surface-low px-3 py-2">
+              <span className="flex items-center gap-3">
+                <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-on-primary ${
+                  ['bg-faction-red','bg-faction-blue','bg-faction-gold','bg-faction-green'][i] ?? 'bg-outline'
+                }`}>
+                  {i + 1}
+                </span>
+                <span className="text-sm font-bold text-on-surface">{p.name}</span>
+                {p.id === myPlayerId ? <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">you</span> : null}
+              </span>
+              <span className="text-sm font-extrabold text-primary">{p.victoryPoints ?? 0} VP</span>
+            </div>
+          ))}
+        </div>
+        <Button onClick={onLeave}>Back to Landing</Button>
+      </Card>
     </div>,
     document.body
   );

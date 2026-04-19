@@ -309,17 +309,31 @@ const Road = memo(function Road({ eKey, ownerIndex }) {
   if (!parsed) return null;
   const { a, b } = edgeEndpoints(parsed.q, parsed.r, parsed.dir, HEX.SIZE);
   const color = FACTION_COLORS[ownerIndex ?? 0];
+  // Two-stroke trick: a fat cream "halo" behind a slightly thinner colored
+  // line. Roads always pop off the tile, even when faction color == terrain.
   return (
-    <line
-      x1={a.x}
-      y1={a.y}
-      x2={b.x}
-      y2={b.y}
-      stroke={color}
-      strokeWidth={7}
-      strokeLinecap="round"
-      vectorEffect="non-scaling-stroke"
-    />
+    <g>
+      <line
+        x1={a.x}
+        y1={a.y}
+        x2={b.x}
+        y2={b.y}
+        stroke="#fafaf3"
+        strokeWidth={11}
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      <line
+        x1={a.x}
+        y1={a.y}
+        x2={b.x}
+        y2={b.y}
+        stroke={color}
+        strokeWidth={7}
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </g>
   );
 });
 
@@ -333,23 +347,30 @@ const Building = memo(function Building({ vKey, v }) {
   const isCity = v.building === 'city';
   const s = HEX.SIZE * (isCity ? 0.22 : 0.18);
 
+  // Cream halo + dark outline so the faction-colored body is readable even
+  // when faction == terrain (red on hills, green on forest, gold on fields).
   if (isCity) {
-    // A settlement + an adjoining taller tower (simple 2-block silhouette).
     return (
       <g transform={`translate(${x} ${y})`}>
-        <rect x={-s * 1.1} y={-s * 0.2} width={s * 2.2} height={s * 0.9} fill={color} stroke="#1a1c18" strokeWidth={1.25} vectorEffect="non-scaling-stroke" />
-        <polygon points={`${-s * 1.1},${-s * 0.2} ${s * 1.1},${-s * 0.2} 0,${-s * 1.0}`} fill={color} stroke="#1a1c18" strokeWidth={1.25} vectorEffect="non-scaling-stroke" />
-        <rect x={s * 0.3} y={-s * 0.8} width={s * 0.6} height={s * 0.6} fill={color} stroke="#1a1c18" strokeWidth={1.25} vectorEffect="non-scaling-stroke" />
+        <rect x={-s * 1.25} y={-s * 0.35} width={s * 2.5} height={s * 1.1} fill="#fafaf3" vectorEffect="non-scaling-stroke" />
+        <polygon points={`${-s * 1.25},${-s * 0.3} ${s * 1.25},${-s * 0.3} 0,${-s * 1.15}`} fill="#fafaf3" vectorEffect="non-scaling-stroke" />
+        <rect x={s * 0.22} y={-s * 0.95} width={s * 0.76} height={s * 0.75} fill="#fafaf3" vectorEffect="non-scaling-stroke" />
+        <rect x={-s * 1.1} y={-s * 0.2} width={s * 2.2} height={s * 0.9} fill={color} stroke="#1a1c18" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        <polygon points={`${-s * 1.1},${-s * 0.2} ${s * 1.1},${-s * 0.2} 0,${-s * 1.0}`} fill={color} stroke="#1a1c18" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        <rect x={s * 0.3} y={-s * 0.8} width={s * 0.6} height={s * 0.6} fill={color} stroke="#1a1c18" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
       </g>
     );
   }
+  const housePoints = `${-s},${s * 0.55} ${-s},${-s * 0.35} 0,${-s * 0.95} ${s},${-s * 0.35} ${s},${s * 0.55}`;
+  const haloPoints = `${-s * 1.18},${s * 0.68} ${-s * 1.18},${-s * 0.45} 0,${-s * 1.15} ${s * 1.18},${-s * 0.45} ${s * 1.18},${s * 0.68}`;
   return (
     <g transform={`translate(${x} ${y})`}>
+      <polygon points={haloPoints} fill="#fafaf3" vectorEffect="non-scaling-stroke" />
       <polygon
-        points={`${-s},${s * 0.55} ${-s},${-s * 0.35} 0,${-s * 0.95} ${s},${-s * 0.35} ${s},${s * 0.55}`}
+        points={housePoints}
         fill={color}
         stroke="#1a1c18"
-        strokeWidth={1.25}
+        strokeWidth={1.5}
         vectorEffect="non-scaling-stroke"
       />
     </g>
