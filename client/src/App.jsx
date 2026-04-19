@@ -17,6 +17,7 @@ import { createPortal } from 'react-dom';
 import { io } from './lib/socket-shim'; // TEMP: replaced by partysocket in Phase 1.11
 import Lobby from './components/Lobby';
 import GameBoard from './components/GameBoard';
+import PWAInstallHint from './components/PWAInstallHint';
 import './App.css';
 
 // Server URL from environment variable, falls back to localhost for development
@@ -254,12 +255,15 @@ function App() {
   // No active game - show lobby for creating/joining games
   if (!gameState) {
     return (
-      <Lobby 
-        onCreateGame={handleCreateGame}
-        onJoinGame={handleJoinGame}
-        error={error}
-        setError={setError}
-      />
+      <>
+        <Lobby
+          onCreateGame={handleCreateGame}
+          onJoinGame={handleJoinGame}
+          error={error}
+          setError={setError}
+        />
+        {createPortal(<PWAInstallHint />, document.body)}
+      </>
     );
   }
 
@@ -267,7 +271,7 @@ function App() {
   return (
     <>
       <div className="app">
-        <GameBoard 
+        <GameBoard
           socket={socket}
           gameState={gameState}
           playerId={playerId}
@@ -277,7 +281,7 @@ function App() {
           addNotification={addNotification}
         />
       </div>
-      
+
       {/* Toast notifications - rendered via Portal to document.body for proper z-index */}
       {createPortal(
         <div className="notifications">
@@ -289,6 +293,7 @@ function App() {
         </div>,
         document.body
       )}
+      {createPortal(<PWAInstallHint />, document.body)}
     </>
   );
 }
