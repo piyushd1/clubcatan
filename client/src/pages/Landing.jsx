@@ -9,10 +9,12 @@ import { Icons } from '../components/ui/icons';
  * Pure presentational — all async work (opening a PartyKit room, RPC-ing the
  * server) happens in App.jsx via `onCreate`/`onJoin` callbacks.
  */
-export function Landing({ defaultName = '', onCreate, onJoin, busy, error }) {
-  const [mode, setMode] = useState(null); // null | 'create' | 'join'
+export function Landing({ defaultName = '', invitedCode = null, onCreate, onJoin, busy, error }) {
+  // A shared `?room=XXXXXX` link drops straight into Join mode with the code
+  // pre-filled. User only has to type their name.
+  const [mode, setMode] = useState(invitedCode ? 'join' : null);
   const [name, setName] = useState(defaultName);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(invitedCode ?? '');
   const [extended, setExtended] = useState(false);
   const [specialBuild, setSpecialBuild] = useState(false);
 

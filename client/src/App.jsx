@@ -211,15 +211,27 @@ function App() {
     }
   }, [client, pushNotification]);
 
-  // Pick up ?room=CODE from the URL on first load (copied share link).
+  // Pick up ?room=CODE from the URL on first load (shared link). Stored in
+  // state so Landing can pre-fill Join mode. We leave the URL param alone —
+  // clearing it would make the link un-recopyable mid-session.
+  const [invitedCode, setInvitedCode] = useState(() => {
+    try {
+      return new URL(window.location.href).searchParams.get('room')?.toUpperCase() || null;
+    } catch { return null; }
+  });
+
+  // Clear the invite once the user is in a room, so leaving the room doesn't
+  // accidentally re-prefill the join form with the code they just left.
   useEffect(() => {
-    if (session?.roomCode) return;
-    const url = new URL(window.location.href);
-    const roomParam = url.searchParams.get('room');
-    if (!roomParam) return;
-    // Don't auto-join — surface it by pre-filling the landing form.
-    // Easiest path: leave it as a URL param; the join form's button flow handles it.
-  }, [session]);
+    if (session?.roomCode && invitedCode) {
+      setInvitedCode(null);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('room');
+        window.history.replaceState({}, '', url.toString());
+      } catch {}
+    }
+  }, [session, invitedCode]);
 
   // ---- Render ----
   if (!session?.roomCode) {
@@ -227,6 +239,7 @@ function App() {
       <>
         <Landing
           defaultName={defaultName}
+          invitedCode={invitedCode}
           busy={busy}
           error={error}
           onCreate={handleCreate}

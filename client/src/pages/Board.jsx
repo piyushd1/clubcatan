@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useGameStore } from '../stores/gameStore';
 import { BottomNav, Button, Card, Chip, ResourceHUD } from '../components/ui';
 import { Icons } from '../components/ui/icons';
@@ -27,10 +28,12 @@ export function Board({ roomCode, playerId, client, onLeave }) {
   const pushNotification = useGameStore((s) => s.pushNotification);
   const [activeTab, setActiveTab] = useState('board');
 
-  // During setup the client does: tap vertex → server places settlement →
-  // we remember the vKey → tap adjacent edge → server places road →
-  // we auto-advanceSetup. `pendingSetupSettlement` tracks that mid-step.
+  // Setup flow — remember the vertex of the settlement we just placed so we
+  // can feed it to placeRoad as lastSettlement and then advanceSetup.
   const [pendingSetupSettlement, setPendingSetupSettlement] = useState(null);
+
+  // Steal chooser modal state: null | { hexKey, players: [{id,name,hasResources}] }
+  const [stealChooser, setStealChooser] = useState(null);
 
   const me = useMemo(
     () => game?.players?.find((p) => p.id === playerId) ?? null,
@@ -40,7 +43,19 @@ export function Board({ roomCode, playerId, client, onLeave }) {
   const currentIndex = game?.currentPlayerIndex ?? 0;
   const isMyTurn = players[currentIndex]?.id === playerId;
   const phase = game?.phase ?? 'setup';
+  const turnPhase = game?.turnPhase ?? 'roll';
   const myIndex = players.findIndex((p) => p.id === playerId);
+
+  // When a 7 is rolled, the server sets `discardingPlayers` for anyone with
+  // >7 cards. If I'm in that list, open the discard dialog.
+  const myDiscardInfo = useMemo(() => {
+    const list = game?.discardingPlayers ?? [];
+    return list.find((d) => d.playerIndex === myIndex) ?? null;
+  }, [game, myIndex]);
+
+  const isRobberTurn = phase === 'playing' && isMyTurn && turnPhase === 'robber';
+
+  // -------- Actions -------------------------------------------------------
 
   const rollDice = async () => {
     try { await client?.call('rollDice'); }
@@ -52,7 +67,40 @@ export function Board({ roomCode, playerId, client, onLeave }) {
     catch (err) { pushNotification(err.message || 'Could not end turn'); }
   };
 
-  // -------- Vertex/edge handlers ------------------------------------------
+  const doMoveRobber = useCallback(
+    async (hexKey, stealFromPlayerId) => {
+      try {
+        await client.call('moveRobber', { hexKey, stealFromPlayerId });
+      } catch (err) {
+        pushNotification(err.message || 'Cannot move robber there');
+      }
+    },
+    [client, pushNotification]
+  );
+
+  const onHexClick = useCallback(
+    async (hexKey) => {
+      if (!isRobberTurn || !client) return;
+      if (hexKey === game?.robber) {
+        pushNotification('Must move the robber to a different hex.');
+        return;
+      }
+      try {
+        const { players: targetable } = await client.call('getPlayersOnHex', { hexKey });
+        const stealable = (targetable ?? []).filter((p) => p.hasResources);
+        if (stealable.length === 0) {
+          await doMoveRobber(hexKey);
+        } else if (stealable.length === 1) {
+          await doMoveRobber(hexKey, stealable[0].id);
+        } else {
+          setStealChooser({ hexKey, players: stealable });
+        }
+      } catch (err) {
+        pushNotification(err.message || 'Could not query hex');
+      }
+    },
+    [client, game, isRobberTurn, doMoveRobber, pushNotification]
+  );
 
   const onVertexClick = useCallback(
     async (vKey, vertex) => {
@@ -70,21 +118,19 @@ export function Board({ roomCode, playerId, client, onLeave }) {
         }
         return;
       }
-      if (phase === 'playing') {
-        // Tap my own settlement → try to upgrade to city.
-        if (vertex.building === 'settlement' && vertex.owner === myIndex) {
-          try { await client.call('upgradeToCity', { vertexKey: vKey }); }
-          catch (err) { pushNotification(err.message || 'Cannot upgrade'); }
-          return;
-        }
-        // Empty vertex → try to build a new settlement.
-        if (!vertex.building) {
-          try { await client.call('placeSettlement', { vertexKey: vKey }); }
-          catch (err) { pushNotification(err.message || 'Cannot build'); }
-        }
+      if (phase !== 'playing') return;
+      if (turnPhase === 'robber' || turnPhase === 'discard') return;
+      if (vertex.building === 'settlement' && vertex.owner === myIndex) {
+        try { await client.call('upgradeToCity', { vertexKey: vKey }); }
+        catch (err) { pushNotification(err.message || 'Cannot upgrade'); }
+        return;
+      }
+      if (!vertex.building) {
+        try { await client.call('placeSettlement', { vertexKey: vKey }); }
+        catch (err) { pushNotification(err.message || 'Cannot build'); }
       }
     },
-    [client, isMyTurn, phase, pendingSetupSettlement, myIndex, pushNotification]
+    [client, isMyTurn, phase, turnPhase, pendingSetupSettlement, myIndex, pushNotification]
   );
 
   const onEdgeClick = useCallback(
@@ -102,7 +148,6 @@ export function Board({ roomCode, playerId, client, onLeave }) {
             lastSettlement: pendingSetupSettlement,
           });
           setPendingSetupSettlement(null);
-          // Auto-advance setup turn — the server rotates to the next player.
           try { await client.call('advanceSetup'); }
           catch (err) { pushNotification(err.message || 'Could not advance'); }
         } catch (err) {
@@ -110,61 +155,48 @@ export function Board({ roomCode, playerId, client, onLeave }) {
         }
         return;
       }
-      if (phase === 'playing') {
-        try { await client.call('placeRoad', { edgeKey: eKey }); }
-        catch (err) { pushNotification(err.message || 'Cannot build road'); }
-      }
+      if (phase !== 'playing') return;
+      if (turnPhase === 'robber' || turnPhase === 'discard') return;
+      try { await client.call('placeRoad', { edgeKey: eKey }); }
+      catch (err) { pushNotification(err.message || 'Cannot build road'); }
     },
-    [client, isMyTurn, phase, pendingSetupSettlement, pushNotification]
+    [client, isMyTurn, phase, turnPhase, pendingSetupSettlement, pushNotification]
   );
+
+  const onStealPicked = async (playerIdOrNull) => {
+    if (!stealChooser) return;
+    const hexKey = stealChooser.hexKey;
+    setStealChooser(null);
+    await doMoveRobber(hexKey, playerIdOrNull);
+  };
 
   return (
     <main className="relative flex min-h-dvh flex-col bg-surface pb-[calc(88px+env(safe-area-inset-bottom))]">
-      {/* Players strip */}
       <header className="sticky top-0 z-30 bg-surface/80 backdrop-blur-xl supports-[not(backdrop-filter:blur(0))]:bg-surface/96 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-3">
         <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            aria-label="Leave"
-            onClick={onLeave}
-            className="rounded-full p-2 text-primary hover:bg-surface-container"
-          >
+          <button type="button" aria-label="Leave" onClick={onLeave} className="rounded-full p-2 text-primary hover:bg-surface-container">
             <Icons.ArrowLeft size={20} />
           </button>
-          <span className="text-xs font-extrabold uppercase tracking-[0.2em] text-primary">
-            {roomCode}
-          </span>
-          <button
-            type="button"
-            aria-label="Settings"
-            className="rounded-full p-2 text-primary hover:bg-surface-container"
-          >
-            <Icons.Settings size={20} />
-          </button>
+          <span className="text-xs font-extrabold uppercase tracking-[0.2em] text-primary">{roomCode}</span>
+          <SettingsMenu onLeave={onLeave} />
         </div>
 
         <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar">
           {players.map((p, i) => (
-            <PlayerPip
-              key={p.id}
-              player={p}
-              faction={FACTIONS[i] ?? 'red'}
-              isTurn={i === currentIndex}
-              isYou={p.id === playerId}
-            />
+            <PlayerPip key={p.id} player={p} faction={FACTIONS[i] ?? 'red'} isTurn={i === currentIndex} isYou={p.id === playerId} />
           ))}
         </div>
       </header>
 
-      {/* Board canvas */}
       <section className="relative flex-1 px-2 py-2">
         {game?.hexes ? (
           <div className="mx-auto max-w-[640px]">
             <HexBoard
               game={game}
               playerId={playerId}
-              onVertexClick={isMyTurn ? onVertexClick : undefined}
-              onEdgeClick={isMyTurn ? onEdgeClick : undefined}
+              onVertexClick={isMyTurn && turnPhase !== 'robber' && turnPhase !== 'discard' ? onVertexClick : undefined}
+              onEdgeClick={isMyTurn && turnPhase !== 'robber' && turnPhase !== 'discard' ? onEdgeClick : undefined}
+              onHexClick={isRobberTurn ? onHexClick : undefined}
             />
           </div>
         ) : (
@@ -172,61 +204,29 @@ export function Board({ roomCode, playerId, client, onLeave }) {
         )}
       </section>
 
-      {/* Turn indicator + action row */}
       <section className="relative z-20 px-4 pb-20">
-        <Card tone="low" className="mx-auto flex max-w-md flex-col items-center gap-3 text-center">
-          <p className="text-xs font-bold uppercase tracking-wider text-on-surface/50">
-            {phase === 'setup' ? 'Preparing for Settlement' : phase === 'finished' ? 'Expedition Ended' : 'Expedition in Progress'}
-          </p>
-          <p className="text-lg font-bold text-on-surface">
-            {isMyTurn
-              ? phase === 'setup'
-                ? pendingSetupSettlement
-                  ? 'Tap an adjacent edge to place your road'
-                  : 'Tap a vertex to place your settlement'
-                : 'Your move'
-              : `${players[currentIndex]?.name ?? '…'} is planning`}
-          </p>
-          {lastRoll?.total ? (
-            <p className="text-sm text-on-surface-variant">
-              Last roll: <span className="font-extrabold text-primary">{lastRoll.total}</span>
-            </p>
-          ) : null}
-
-          {isMyTurn && phase === 'playing' ? (
-            <div className="flex w-full gap-2">
-              <Button
-                className="flex-1"
-                icon={<Icons.Dice size={18} />}
-                onClick={rollDice}
-                disabled={!!game?.hasRolledThisTurn}
-              >
-                Roll
-              </Button>
-              <Button
-                className="flex-1"
-                variant="secondary"
-                icon={<Icons.Check size={16} />}
-                onClick={endTurn}
-                disabled={!game?.hasRolledThisTurn}
-              >
-                End Turn
-              </Button>
-            </div>
-          ) : null}
-        </Card>
+        <TurnCard
+          phase={phase}
+          turnPhase={turnPhase}
+          isMyTurn={isMyTurn}
+          pendingSetupSettlement={pendingSetupSettlement}
+          currentName={players[currentIndex]?.name}
+          lastRoll={lastRoll}
+          hasRolled={!!game?.hasRolledThisTurn}
+          onRoll={rollDice}
+          onEndTurn={endTurn}
+        />
       </section>
 
-      {/* Resource HUD */}
       {me ? (
         <ResourceHUD>
           {RESOURCE_ORDER.map((r) => (
-            <Chip key={r} tint={RESOURCE_TINTS[r]} count={me.resources?.[r] ?? 0}>
-              {RESOURCE_LABELS[r]}
-            </Chip>
+            <Chip key={r} tint={RESOURCE_TINTS[r]} count={me.resources?.[r] ?? 0}>{RESOURCE_LABELS[r]}</Chip>
           ))}
         </ResourceHUD>
       ) : null}
+
+      {activeTab !== 'board' ? <TabPanel tab={activeTab} onClose={() => setActiveTab('board')} /> : null}
 
       <BottomNav
         active={activeTab}
@@ -238,9 +238,75 @@ export function Board({ roomCode, playerId, client, onLeave }) {
           { id: 'status', label: 'Status', icon: <Icons.People size={18} /> },
         ]}
       />
+
+      {stealChooser ? (
+        <ModalOverlay onClose={() => setStealChooser(null)}>
+          <Card tone="surface" className="w-full max-w-sm flex flex-col gap-4">
+            <h2 className="text-lg font-bold text-on-surface">Steal from whom?</h2>
+            <p className="text-sm text-on-surface-variant">Pick a player on that hex.</p>
+            <div className="flex flex-col gap-2">
+              {stealChooser.players.map((p) => (
+                <Button key={p.id} variant="secondary" onClick={() => onStealPicked(p.id)}>{p.name}</Button>
+              ))}
+              <Button variant="tertiary" onClick={() => onStealPicked(null)}>Steal nothing</Button>
+            </div>
+          </Card>
+        </ModalOverlay>
+      ) : null}
+
+      {myDiscardInfo && me ? (
+        <DiscardDialog
+          required={myDiscardInfo.cardsToDiscard}
+          resources={me.resources}
+          onSubmit={async (picks) => {
+            try { await client.call('discardCards', { resources: picks }); }
+            catch (err) { pushNotification(err.message || 'Discard failed'); }
+          }}
+        />
+      ) : null}
     </main>
   );
 }
+
+// ---------- Turn card ---------------------------------------------------
+
+function TurnCard({ phase, turnPhase, isMyTurn, pendingSetupSettlement, currentName, lastRoll, hasRolled, onRoll, onEndTurn }) {
+  const phaseLabel =
+    phase === 'setup' ? 'Preparing for Settlement' :
+    phase === 'finished' ? 'Expedition Ended' :
+    'Expedition in Progress';
+
+  let status;
+  if (!isMyTurn) status = `${currentName ?? '…'} is planning`;
+  else if (phase === 'setup') status = pendingSetupSettlement ? 'Tap an adjacent edge to place your road' : 'Tap a vertex to place your settlement';
+  else if (turnPhase === 'discard') status = 'Rolled a 7 — everyone with >7 cards must discard';
+  else if (turnPhase === 'robber') status = 'Move the robber: tap a hex';
+  else status = 'Your move';
+
+  return (
+    <Card tone="low" className="mx-auto flex max-w-md flex-col items-center gap-3 text-center">
+      <p className="text-xs font-bold uppercase tracking-wider text-on-surface/50">{phaseLabel}</p>
+      <p className="text-lg font-bold text-on-surface">{status}</p>
+      {lastRoll?.total ? (
+        <p className="text-sm text-on-surface-variant">
+          Last roll: <span className="font-extrabold text-primary">{lastRoll.total}</span>
+        </p>
+      ) : null}
+
+      {isMyTurn && phase === 'playing' && turnPhase === 'roll' ? (
+        <Button className="w-full" icon={<Icons.Dice size={18} />} onClick={onRoll}>Roll the Dice</Button>
+      ) : null}
+
+      {isMyTurn && phase === 'playing' && turnPhase === 'main' ? (
+        <Button className="w-full" variant="secondary" icon={<Icons.Check size={16} />} onClick={onEndTurn} disabled={!hasRolled}>
+          End Turn
+        </Button>
+      ) : null}
+    </Card>
+  );
+}
+
+// ---------- Player pip + misc -------------------------------------------
 
 function PlayerPip({ player, faction, isTurn, isYou }) {
   const factionColor = {
@@ -251,21 +317,11 @@ function PlayerPip({ player, faction, isTurn, isYou }) {
   }[faction] ?? 'bg-outline';
   const initial = (player.name?.[0] ?? '?').toUpperCase();
   return (
-    <div
-      className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 ${
-        isTurn ? 'bg-surface-highest shadow-ambient' : 'bg-surface-high'
-      }`}
-    >
-      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-on-primary ${factionColor}`}>
-        {initial}
-      </span>
+    <div className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 ${isTurn ? 'bg-surface-highest shadow-ambient' : 'bg-surface-high'}`}>
+      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-on-primary ${factionColor}`}>{initial}</span>
       <span className="flex flex-col leading-none">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface/50">
-          {isYou ? 'You' : player.name}
-        </span>
-        <span className="text-sm font-extrabold text-on-surface">
-          {player.victoryPoints ?? 0} VP
-        </span>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface/50">{isYou ? 'You' : player.name}</span>
+        <span className="text-sm font-extrabold text-on-surface">{player.victoryPoints ?? 0} VP</span>
       </span>
     </div>
   );
@@ -281,6 +337,151 @@ function EmptyBoard() {
         <p className="text-sm text-on-surface-variant">Generating the isles…</p>
       </div>
     </Card>
+  );
+}
+
+// ---------- Settings dropdown ------------------------------------------
+
+function SettingsMenu({ onLeave }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (!e.target.closest?.('[data-settings-menu]')) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <div data-settings-menu className="relative">
+      <button
+        type="button"
+        aria-label="Settings"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-full p-2 text-primary hover:bg-surface-container"
+      >
+        <Icons.Settings size={20} />
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-full mt-2 w-48 rounded-xl bg-surface-container shadow-ambient ring-1 ring-outline-variant/30 overflow-hidden">
+          <button
+            type="button"
+            className="w-full text-left px-4 py-3 text-sm font-semibold text-on-surface hover:bg-surface-high"
+            onClick={() => { setOpen(false); onLeave(); }}
+          >
+            Leave expedition
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ---------- Tab panels (stubs for now) ---------------------------------
+
+function TabPanel({ tab, onClose }) {
+  const TITLES = {
+    trade: { title: 'Marketplace', hint: 'Bank trades and player offers land here next. Phase 1.9.' },
+    cards: { title: 'Development Cards', hint: 'Knight, road-building, monopoly and more. Phase 1.9.' },
+    status: { title: 'Expedition Status', hint: 'Scores, achievements, log. Phase 1.9.' },
+  };
+  const copy = TITLES[tab] ?? { title: tab, hint: 'Coming soon.' };
+  return createPortal(
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-on-surface/40 backdrop-blur-sm pointer-events-auto pb-[calc(96px+env(safe-area-inset-bottom))]" onClick={onClose}>
+      <div className="w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+        <Card tone="surface" className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-on-surface">{copy.title}</h2>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container"
+            >
+              <Icons.X size={18} />
+            </button>
+          </div>
+          <p className="text-sm text-on-surface-variant">{copy.hint}</p>
+        </Card>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------- Modal overlay (steal chooser) ------------------------------
+
+function ModalOverlay({ children, onClose }) {
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/45 backdrop-blur-sm px-4"
+      onClick={onClose}
+    >
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm">{children}</div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------- Discard dialog ---------------------------------------------
+
+function DiscardDialog({ required, resources, onSubmit }) {
+  const [picks, setPicks] = useState(() =>
+    Object.fromEntries(RESOURCE_ORDER.map((r) => [r, 0]))
+  );
+  const total = RESOURCE_ORDER.reduce((sum, r) => sum + (picks[r] ?? 0), 0);
+  const adjust = (r, delta) => {
+    setPicks((prev) => {
+      const curr = prev[r] ?? 0;
+      const max = resources?.[r] ?? 0;
+      const next = Math.max(0, Math.min(max, curr + delta));
+      return { ...prev, [r]: next };
+    });
+  };
+  const canSubmit = total === required;
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/55 backdrop-blur-sm px-4">
+      <Card tone="surface" className="w-full max-w-md flex flex-col gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-on-surface">You rolled into a 7</h2>
+          <p className="text-sm text-on-surface-variant mt-1">
+            Discard <span className="font-bold text-primary">{required}</span> cards. Tap + / − to pick.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2">
+          {RESOURCE_ORDER.map((r) => (
+            <div key={r} className="flex items-center justify-between rounded-md bg-surface p-3">
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-on-surface">{RESOURCE_LABELS[r]}</span>
+                <span className="text-xs text-on-surface-variant">Have: {resources?.[r] ?? 0}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label={`Less ${RESOURCE_LABELS[r]}`}
+                  onClick={() => adjust(r, -1)}
+                  className="h-9 w-9 rounded-full bg-surface-high text-on-surface font-bold"
+                >−</button>
+                <span className="min-w-[2ch] text-center text-base font-extrabold text-on-surface">{picks[r]}</span>
+                <button
+                  type="button"
+                  aria-label={`More ${RESOURCE_LABELS[r]}`}
+                  onClick={() => adjust(r, +1)}
+                  className="h-9 w-9 rounded-full bg-surface-high text-on-surface font-bold"
+                >+</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-on-surface-variant">
+            Picked <span className="font-bold text-on-surface">{total}</span> / {required}
+          </span>
+          <Button disabled={!canSubmit} onClick={() => onSubmit(picks)}>Confirm</Button>
+        </div>
+      </Card>
+    </div>,
+    document.body
   );
 }
 

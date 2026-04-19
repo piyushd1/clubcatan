@@ -41,7 +41,7 @@ const TERRAIN_LABEL_FILL = {
 // Six faction colors — mapped by seat index. Matches the Lobby's FACTIONS list.
 const FACTION_COLORS = ['#9c4323', '#3b5f7a', '#a48a2e', '#154212', '#6b3b7a', '#2f7a73'];
 
-export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClick }) {
+export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClick, onHexClick }) {
   if (!game?.hexes) return null;
 
   const hexes = useMemo(() => Object.values(game.hexes), [game.hexes]);
@@ -75,9 +75,21 @@ export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClic
     >
       {/* GROUP-A: hex tiles + number tokens */}
       <g>
-        {hexes.map((h) => (
-          <HexTile key={`${h.q},${h.r}`} hex={h} />
-        ))}
+        {hexes.map((h) => {
+          const hKey = `h_${h.q}_${h.r}`;
+          const isRobber = game.robber === hKey;
+          const highlighted = !!highlights?.hexes?.[hKey];
+          return (
+            <HexTile
+              key={hKey}
+              hex={h}
+              hKey={hKey}
+              highlighted={highlighted}
+              isRobber={isRobber}
+              onClick={onHexClick}
+            />
+          );
+        })}
       </g>
 
       {/* GROUP-B: roads (rendered below vertices so settlement icons overlap road ends cleanly) */}
@@ -197,17 +209,32 @@ const EdgeHit = memo(function EdgeHit({ eKey, occupied, highlighted, onClick }) 
 
 // ---------- Hex tile ---------------------------------------------------------
 
-const HexTile = memo(function HexTile({ hex }) {
+const HexTile = memo(function HexTile({ hex, hKey, highlighted, isRobber, onClick }) {
   const points = hexPolygonPoints(hex.q, hex.r, HEX.SIZE);
   const fill = TERRAIN_FILL[hex.terrain] ?? '#888';
+  const handleClick = onClick ? () => onClick(hKey, hex) : undefined;
   return (
-    <polygon
-      points={points}
-      fill={fill}
-      stroke="#fafaf3"
-      strokeWidth={2}
-      vectorEffect="non-scaling-stroke"
-    />
+    <g onClick={handleClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
+      <polygon
+        points={points}
+        fill={fill}
+        stroke={highlighted ? '#fafaf3' : '#fafaf3'}
+        strokeWidth={highlighted ? 4 : 2}
+        strokeOpacity={highlighted ? 1 : 1}
+        vectorEffect="non-scaling-stroke"
+      />
+      {highlighted ? (
+        <polygon
+          points={points}
+          fill="none"
+          stroke="#154212"
+          strokeWidth={3}
+          strokeDasharray="4 3"
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+      ) : null}
+    </g>
   );
 });
 
