@@ -252,7 +252,21 @@ function App() {
   }
 
   const phase = game?.phase;
-  const inLobby = !phase || phase === 'waiting';
+
+  // While we have a session but haven't received the first gameState yet
+  // (fresh create/join or a cold-DO reconnect), don't flash an empty Lobby
+  // with "0 members." Explicit connecting card instead.
+  if (!game) {
+    return (
+      <>
+        <ConnectingCard code={session.roomCode} status={status} onLeave={handleLeave} />
+        {createPortal(<PWAInstallHint />, document.body)}
+        <NotificationsOverlay items={notifications} />
+      </>
+    );
+  }
+
+  const inLobby = phase === 'waiting';
 
   return (
     <>
@@ -276,6 +290,32 @@ function App() {
       {createPortal(<PWAInstallHint />, document.body)}
       <NotificationsOverlay items={notifications} />
     </>
+  );
+}
+
+function ConnectingCard({ code, status, onLeave }) {
+  const label =
+    status === 'connecting' ? 'Connecting to the edge…' :
+    status === 'open' ? 'Joining the expedition…' :
+    status === 'closed' ? 'Reconnecting…' :
+    'Connecting…';
+  return (
+    <main className="min-h-dvh bg-surface flex items-center justify-center px-6">
+      <div className="max-w-sm w-full flex flex-col items-center gap-6 text-center">
+        <p className="text-xs font-bold uppercase tracking-[0.25em] text-on-surface/50">Expedition {code}</p>
+        <div className="flex items-center gap-3 text-on-surface-variant">
+          <span className="inline-block h-3 w-3 rounded-full bg-primary animate-pulse" aria-hidden="true" />
+          <span className="text-sm font-semibold">{label}</span>
+        </div>
+        <button
+          type="button"
+          onClick={onLeave}
+          className="text-sm font-semibold text-on-surface-variant underline decoration-on-surface-variant/40 underline-offset-4 hover:decoration-on-surface-variant"
+        >
+          Cancel
+        </button>
+      </div>
+    </main>
   );
 }
 
