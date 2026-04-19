@@ -236,7 +236,18 @@ export function Board({ roomCode, playerId, client, onLeave }) {
           isMyTurn={isMyTurn}
           turnPhase={turnPhase}
           phase={phase}
+          myIndex={myIndex}
           onClose={() => setActiveTab('board')}
+          pushNotification={pushNotification}
+        />
+      ) : null}
+
+      {game?.tradeOffer && game.tradeOffer.from !== myIndex ? (
+        <IncomingTradeModal
+          offer={game.tradeOffer}
+          from={players[game.tradeOffer.from]}
+          me={me}
+          client={client}
           pushNotification={pushNotification}
         />
       ) : null}
@@ -402,9 +413,9 @@ function SettingsMenu({ onLeave }) {
   );
 }
 
-// ---------- Trade panel (bank trade for now; player trade next) ---------
+// ---------- Trade panel (bank + player-to-player) -----------------------
 
-function TradePanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, pushNotification }) {
+function TradePanel({ me, game, client, isMyTurn, turnPhase, phase, myIndex, onClose, pushNotification }) {
   const [giveResource, setGiveResource] = useState(null);
   const [getResource, setGetResource] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -506,8 +517,205 @@ function TradePanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, pus
               {busy ? 'Trading…' : 'Complete Trade'}
             </Button>
           </div>
+
+          {/* Player-to-player section */}
+          <div className="mt-4 border-t border-outline-variant/25 pt-4">
+            <h3 className="text-base font-bold text-on-surface">Offer to the Expedition</h3>
+            <p className="text-xs text-on-surface-variant mt-0.5">
+              Propose a swap with any other player. They accept or decline.
+            </p>
+
+            <PlayerTradeSection
+              me={me}
+              game={game}
+              client={client}
+              myIndex={myIndex}
+              tradable={tradable}
+              onClose={onClose}
+              pushNotification={pushNotification}
+            />
+          </div>
         </Card>
       </div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------- Player trade builder ---------------------------------------
+
+const EMPTY = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+
+function PlayerTradeSection({ me, game, client, myIndex, tradable, onClose, pushNotification }) {
+  const [offer, setOffer] = useState({ ...EMPTY });
+  const [request, setRequest] = useState({ ...EMPTY });
+  const [busy, setBusy] = useState(false);
+  const myOffer = game?.tradeOffer?.from === myIndex ? game.tradeOffer : null;
+  const resources = me?.resources ?? {};
+
+  const adjust = (target, setTarget, resource, delta, max) => {
+    setTarget((prev) => {
+      const curr = prev[resource] ?? 0;
+      const next = Math.max(0, curr + delta);
+      if (max !== undefined && next > max) return prev;
+      return { ...prev, [resource]: next };
+    });
+  };
+
+  const totalOffer = RESOURCE_ORDER.reduce((s, r) => s + (offer[r] ?? 0), 0);
+  const totalRequest = RESOURCE_ORDER.reduce((s, r) => s + (request[r] ?? 0), 0);
+  const canPropose =
+    tradable &&
+    !myOffer &&
+    totalOffer > 0 &&
+    totalRequest > 0 &&
+    RESOURCE_ORDER.every((r) => (resources[r] ?? 0) >= (offer[r] ?? 0));
+
+  const propose = async () => {
+    if (!canPropose) return;
+    setBusy(true);
+    try {
+      // Strip zeros — server expects non-empty amounts only.
+      const clean = (obj) =>
+        Object.fromEntries(Object.entries(obj).filter(([, v]) => v > 0));
+      await client.call('proposeTrade', { offer: clean(offer), request: clean(request) });
+      setOffer({ ...EMPTY });
+      setRequest({ ...EMPTY });
+    } catch (err) {
+      pushNotification(err.message || 'Could not propose');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    setBusy(true);
+    try { await client.call('cancelTrade'); }
+    catch (err) { pushNotification(err.message || 'Could not cancel'); }
+    finally { setBusy(false); }
+  };
+
+  if (myOffer) {
+    return (
+      <div className="mt-3 rounded-md bg-surface-low p-3 flex flex-col gap-3">
+        <div className="text-sm text-on-surface">
+          <p className="font-bold">Your offer is on the table.</p>
+          <p className="mt-1 text-on-surface-variant">
+            You give {describeBundle(myOffer.offer)} · You want {describeBundle(myOffer.request)}
+          </p>
+        </div>
+        <Button variant="secondary" onClick={cancel} disabled={busy}>Cancel Offer</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      <BundleBuilder
+        label="You give"
+        bundle={offer}
+        resources={resources}
+        setBundle={setOffer}
+        limit
+        disabled={!tradable || busy}
+      />
+      <BundleBuilder
+        label="You want"
+        bundle={request}
+        setBundle={setRequest}
+        disabled={!tradable || busy}
+      />
+      <Button onClick={propose} disabled={!canPropose || busy}>
+        {busy ? 'Proposing…' : 'Propose to Expedition'}
+      </Button>
+    </div>
+  );
+}
+
+function BundleBuilder({ label, bundle, resources, setBundle, limit = false, disabled }) {
+  return (
+    <div>
+      <p className="text-xs font-bold uppercase tracking-wider text-on-surface/60 mb-2">{label}</p>
+      <div className="flex flex-col gap-1.5">
+        {RESOURCE_ORDER.map((r) => {
+          const count = bundle[r] ?? 0;
+          const have = resources?.[r];
+          const max = limit && resources ? resources[r] : undefined;
+          return (
+            <div key={r} className="flex items-center justify-between rounded-md bg-surface p-2 px-3">
+              <span className="flex flex-col">
+                <span className="text-sm font-semibold text-on-surface">{RESOURCE_LABELS[r]}</span>
+                {have !== undefined ? <span className="text-[10px] text-on-surface-variant">have {have}</span> : null}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={disabled || count <= 0}
+                  onClick={() => setBundle((p) => ({ ...p, [r]: Math.max(0, (p[r] ?? 0) - 1) }))}
+                  className="h-7 w-7 rounded-full bg-surface-high text-on-surface font-bold disabled:opacity-30"
+                  aria-label={`Less ${RESOURCE_LABELS[r]}`}
+                >−</button>
+                <span className="min-w-[1.5ch] text-center text-sm font-extrabold">{count}</span>
+                <button
+                  type="button"
+                  disabled={disabled || (max !== undefined && count >= max)}
+                  onClick={() => setBundle((p) => ({
+                    ...p,
+                    [r]: (max !== undefined ? Math.min(max, (p[r] ?? 0) + 1) : (p[r] ?? 0) + 1),
+                  }))}
+                  className="h-7 w-7 rounded-full bg-surface-high text-on-surface font-bold disabled:opacity-30"
+                  aria-label={`More ${RESOURCE_LABELS[r]}`}
+                >+</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function describeBundle(bundle) {
+  const parts = RESOURCE_ORDER
+    .filter((r) => (bundle?.[r] ?? 0) > 0)
+    .map((r) => `${bundle[r]} ${RESOURCE_LABELS[r]}`);
+  return parts.length ? parts.join(', ') : 'nothing';
+}
+
+// ---------- Incoming trade modal (renders for all non-proposers) --------
+
+function IncomingTradeModal({ offer, from, me, client, pushNotification }) {
+  const [busy, setBusy] = useState(false);
+  const canAccept = RESOURCE_ORDER.every(
+    (r) => (me?.resources?.[r] ?? 0) >= (offer.request?.[r] ?? 0)
+  );
+  const respond = async (accept) => {
+    setBusy(true);
+    try { await client.call('respondToTrade', { accept }); }
+    catch (err) { pushNotification(err.message || 'Trade response failed'); }
+    finally { setBusy(false); }
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/50 backdrop-blur-sm px-4">
+      <Card tone="surface" className="w-full max-w-sm flex flex-col gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-on-surface/50">Incoming Offer</p>
+          <h2 className="text-lg font-bold text-on-surface mt-1">
+            {from?.name ?? 'Someone'} proposes a trade
+          </h2>
+        </div>
+        <div className="rounded-md bg-surface-low p-3 text-sm text-on-surface space-y-1">
+          <p><span className="text-on-surface-variant">They give:</span> <span className="font-semibold">{describeBundle(offer.offer)}</span></p>
+          <p><span className="text-on-surface-variant">They want:</span> <span className="font-semibold">{describeBundle(offer.request)}</span></p>
+          {!canAccept ? (
+            <p className="text-xs text-secondary font-semibold pt-1">You don't have what they're asking for.</p>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" disabled={busy} onClick={() => respond(false)}>Decline</Button>
+          <Button disabled={busy || !canAccept} onClick={() => respond(true)}>Accept</Button>
+        </div>
+      </Card>
     </div>,
     document.body
   );
