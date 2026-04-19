@@ -228,7 +228,21 @@ export function Board({ roomCode, playerId, client, onLeave }) {
         </ResourceHUD>
       ) : null}
 
-      {activeTab !== 'board' ? <TabPanel tab={activeTab} onClose={() => setActiveTab('board')} /> : null}
+      {activeTab === 'trade' ? (
+        <TradePanel
+          me={me}
+          game={game}
+          client={client}
+          isMyTurn={isMyTurn}
+          turnPhase={turnPhase}
+          phase={phase}
+          onClose={() => setActiveTab('board')}
+          pushNotification={pushNotification}
+        />
+      ) : null}
+      {activeTab === 'cards' || activeTab === 'status'
+        ? <TabPanel tab={activeTab} onClose={() => setActiveTab('board')} />
+        : null}
 
       <BottomNav
         active={activeTab}
@@ -388,11 +402,153 @@ function SettingsMenu({ onLeave }) {
   );
 }
 
-// ---------- Tab panels (stubs for now) ---------------------------------
+// ---------- Trade panel (bank trade for now; player trade next) ---------
+
+function TradePanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, pushNotification }) {
+  const [giveResource, setGiveResource] = useState(null);
+  const [getResource, setGetResource] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const tradable = phase === 'playing' && isMyTurn && turnPhase === 'main';
+  const ratios = game?.tradeRatios ?? {};
+  const resources = me?.resources ?? {};
+  const giveRatio = giveResource ? (ratios[giveResource] ?? 4) : null;
+
+  const canSubmit =
+    tradable &&
+    giveResource &&
+    getResource &&
+    giveResource !== getResource &&
+    (resources[giveResource] ?? 0) >= (giveRatio ?? 4);
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    try {
+      await client.call('bankTrade', {
+        giveResource,
+        giveAmount: giveRatio,
+        getResource,
+      });
+      setGiveResource(null);
+      setGetResource(null);
+      onClose();
+    } catch (err) {
+      pushNotification(err.message || 'Trade failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-on-surface/40 backdrop-blur-sm pb-[calc(96px+env(safe-area-inset-bottom))]"
+      onClick={onClose}
+    >
+      <div className="w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+        <Card tone="surface" className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-on-surface">Marketplace</h2>
+              <p className="text-xs text-on-surface-variant">Bank trade — ratios reflect your ports.</p>
+            </div>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container"
+            >
+              <Icons.X size={18} />
+            </button>
+          </div>
+
+          {!tradable ? (
+            <p className="text-sm text-on-surface-variant">
+              {phase !== 'playing'
+                ? 'Trading opens after the setup phase.'
+                : !isMyTurn
+                ? 'You can only trade on your own turn.'
+                : turnPhase === 'roll'
+                ? 'Roll the dice first, then trade.'
+                : 'Not a trading moment.'}
+            </p>
+          ) : null}
+
+          <TradeRow
+            label="I give"
+            selected={giveResource}
+            onSelect={setGiveResource}
+            resources={resources}
+            ratios={ratios}
+            disabled={!tradable}
+          />
+
+          <TradeRow
+            label="I want"
+            selected={getResource}
+            onSelect={setGetResource}
+            disabled={!tradable}
+          />
+
+          {giveResource && getResource && giveResource !== getResource ? (
+            <div className="rounded-md bg-surface-low p-3 text-sm text-on-surface">
+              Trade <span className="font-bold text-primary">{giveRatio} {RESOURCE_LABELS[giveResource]}</span>{' '}
+              for <span className="font-bold text-primary">1 {RESOURCE_LABELS[getResource]}</span>
+              {(resources[giveResource] ?? 0) < giveRatio ? (
+                <span className="ml-2 text-secondary font-semibold">— need {giveRatio - (resources[giveResource] ?? 0)} more</span>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex justify-end gap-2">
+            <Button variant="tertiary" onClick={onClose}>Cancel</Button>
+            <Button onClick={submit} disabled={!canSubmit || busy}>
+              {busy ? 'Trading…' : 'Complete Trade'}
+            </Button>
+          </div>
+        </Card>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function TradeRow({ label, selected, onSelect, resources, ratios, disabled }) {
+  return (
+    <div>
+      <p className="text-xs font-bold uppercase tracking-wider text-on-surface/60 mb-2">{label}</p>
+      <div className="grid grid-cols-5 gap-2">
+        {RESOURCE_ORDER.map((r) => {
+          const active = selected === r;
+          const count = resources?.[r];
+          const ratio = ratios?.[r];
+          return (
+            <button
+              key={r}
+              type="button"
+              disabled={disabled}
+              onClick={() => onSelect(active ? null : r)}
+              className={[
+                'flex flex-col items-center gap-0.5 rounded-md px-2 py-2 text-xs font-bold transition-all',
+                active ? 'bg-primary text-on-primary shadow-ambient -translate-y-0.5' : 'bg-surface-high text-on-surface',
+                disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-surface-highest',
+              ].join(' ')}
+            >
+              <span className="uppercase tracking-wider">{RESOURCE_LABELS[r]}</span>
+              {count !== undefined ? <span className="text-[10px] opacity-80">have {count}</span> : null}
+              {ratio !== undefined ? <span className="text-[10px] opacity-80">{ratio}:1</span> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Tab panels (stubs for remaining) ---------------------------
 
 function TabPanel({ tab, onClose }) {
   const TITLES = {
-    trade: { title: 'Marketplace', hint: 'Bank trades and player offers land here next. Phase 1.9.' },
     cards: { title: 'Development Cards', hint: 'Knight, road-building, monopoly and more. Phase 1.9.' },
     status: { title: 'Expedition Status', hint: 'Scores, achievements, log. Phase 1.9.' },
   };
