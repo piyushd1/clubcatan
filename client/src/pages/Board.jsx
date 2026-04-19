@@ -251,9 +251,29 @@ export function Board({ roomCode, playerId, client, onLeave }) {
           pushNotification={pushNotification}
         />
       ) : null}
-      {activeTab === 'cards' || activeTab === 'status'
+      {activeTab === 'cards' ? (
+        <DevCardPanel
+          me={me}
+          game={game}
+          client={client}
+          isMyTurn={isMyTurn}
+          turnPhase={turnPhase}
+          phase={phase}
+          onClose={() => setActiveTab('board')}
+          pushNotification={pushNotification}
+        />
+      ) : null}
+      {activeTab === 'status'
         ? <TabPanel tab={activeTab} onClose={() => setActiveTab('board')} />
         : null}
+
+      {isMyTurn && (game?.yearOfPlentyPicks ?? 0) > 0 ? (
+        <YearOfPlentyPicker
+          remaining={game.yearOfPlentyPicks}
+          client={client}
+          pushNotification={pushNotification}
+        />
+      ) : null}
 
       <BottomNav
         active={activeTab}
@@ -750,6 +770,227 @@ function TradeRow({ label, selected, onSelect, resources, ratios, disabled }) {
         })}
       </div>
     </div>
+  );
+}
+
+// ---------- Dev card panel ---------------------------------------------
+
+const DEV_CARD_LABELS = {
+  knight: { title: 'Knight', body: 'Move the robber. If two players have three Knights, you claim Largest Army.' },
+  roadBuilding: { title: 'Road Building', body: 'Place two roads for free on your next two taps.' },
+  yearOfPlenty: { title: 'Year of Plenty', body: 'Take any two resources from the bank.' },
+  monopoly: { title: 'Monopoly', body: 'Choose a resource — every other player hands you all of theirs.' },
+  victoryPoint: { title: 'Victory Point', body: 'Counted toward your score at the end of the game. Not played.' },
+};
+
+function countCards(list) {
+  const map = {};
+  for (const c of list ?? []) map[c] = (map[c] ?? 0) + 1;
+  return map;
+}
+
+function DevCardPanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, pushNotification }) {
+  const [busy, setBusy] = useState(false);
+  const [monopolyPick, setMonopolyPick] = useState(null); // resource id mid-play
+  const tradable = phase === 'playing' && isMyTurn && turnPhase === 'main';
+
+  // me.developmentCards may be an array (mine) or a number (opponent view — n/a here).
+  const owned = Array.isArray(me?.developmentCards) ? me.developmentCards : [];
+  const bought = Array.isArray(me?.newDevCards) ? me.newDevCards : [];
+  const ownedCounts = countCards(owned);
+  const boughtCount = Array.isArray(bought) ? bought.length : (bought ?? 0);
+  const deckLeft = game?.devCardDeck ?? 0;
+  const alreadyPlayedThisTurn = !!game?.devCardPlayedThisTurn;
+
+  const costOK = me?.resources &&
+    me.resources.ore >= 1 &&
+    me.resources.grain >= 1 &&
+    me.resources.wool >= 1;
+  const canBuy = tradable && costOK && deckLeft > 0;
+
+  const buy = async () => {
+    if (!canBuy) return;
+    setBusy(true);
+    try { await client.call('buyDevCard'); }
+    catch (err) { pushNotification(err.message || 'Buy failed'); }
+    finally { setBusy(false); }
+  };
+
+  const play = async (cardType, params) => {
+    if (!tradable || alreadyPlayedThisTurn) return;
+    setBusy(true);
+    try {
+      await client.call('playDevCard', { cardType, params });
+      if (cardType === 'roadBuilding' || cardType === 'knight') onClose();
+    } catch (err) {
+      pushNotification(err.message || 'Play failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-on-surface/40 backdrop-blur-sm pb-[calc(96px+env(safe-area-inset-bottom))]"
+      onClick={onClose}
+    >
+      <div className="w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+        <Card tone="surface" className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-on-surface">Development Cards</h2>
+              <p className="text-xs text-on-surface-variant">
+                Costs <strong>1 ore · 1 wheat · 1 sheep</strong> per card. {deckLeft} left in the deck.
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container"
+            >
+              <Icons.X size={18} />
+            </button>
+          </div>
+
+          {!tradable ? (
+            <p className="text-sm text-on-surface-variant">
+              {phase !== 'playing' ? 'Development cards become available during the main phase.' :
+               !isMyTurn ? 'You can only buy/play on your own turn.' :
+               turnPhase === 'roll' ? 'Roll the dice first.' :
+               'Not a main phase moment.'}
+            </p>
+          ) : null}
+
+          <Button disabled={!canBuy || busy} onClick={buy}>
+            {busy ? 'Working…' : `Buy a Development Card`}
+          </Button>
+
+          {alreadyPlayedThisTurn ? (
+            <p className="text-xs text-secondary font-semibold">You've already played a dev card this turn.</p>
+          ) : null}
+
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface/60 mb-2">
+              In Your Hand ({owned.length})
+            </h3>
+            {owned.length === 0 ? (
+              <p className="text-sm text-on-surface-variant">No cards yet. Buy one above when you can afford it.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {Object.entries(ownedCounts).map(([cardType, count]) => {
+                  const meta = DEV_CARD_LABELS[cardType] ?? { title: cardType, body: '' };
+                  const isPlayable = cardType !== 'victoryPoint' && tradable && !alreadyPlayedThisTurn;
+                  return (
+                    <div key={cardType} className="rounded-md bg-surface-low p-3 flex flex-col gap-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-on-surface">{meta.title} <span className="text-on-surface-variant font-normal">× {count}</span></p>
+                          <p className="text-xs text-on-surface-variant mt-0.5">{meta.body}</p>
+                        </div>
+                        {cardType === 'victoryPoint' ? null : (
+                          <Button size="sm" disabled={!isPlayable || busy}
+                            onClick={() => {
+                              if (cardType === 'monopoly') setMonopolyPick('__open__');
+                              else play(cardType);
+                            }}
+                          >Play</Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {boughtCount > 0 ? (
+              <p className="mt-3 text-xs text-on-surface-variant">
+                {boughtCount} bought this turn — playable next turn.
+              </p>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+
+      {monopolyPick === '__open__' ? (
+        <ResourcePickerModal
+          title="Monopoly — pick a resource"
+          body="Every other player hands you all of that resource."
+          onPick={async (resource) => {
+            setMonopolyPick(null);
+            await play('monopoly', { resource });
+            onClose();
+          }}
+          onCancel={() => setMonopolyPick(null)}
+        />
+      ) : null}
+    </div>,
+    document.body
+  );
+}
+
+// ---------- Year of Plenty picker (auto-opens) --------------------------
+
+function YearOfPlentyPicker({ remaining, client, pushNotification }) {
+  const [busy, setBusy] = useState(false);
+  const pick = async (resource) => {
+    setBusy(true);
+    try { await client.call('yearOfPlentyPick', { resource }); }
+    catch (err) { pushNotification(err.message || 'Pick failed'); }
+    finally { setBusy(false); }
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/50 backdrop-blur-sm px-4">
+      <Card tone="surface" className="w-full max-w-sm flex flex-col gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-on-surface/50">Year of Plenty</p>
+          <h2 className="text-lg font-bold text-on-surface mt-1">Take {remaining} more from the bank</h2>
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          {RESOURCE_ORDER.map((r) => (
+            <button
+              key={r}
+              type="button"
+              disabled={busy}
+              onClick={() => pick(r)}
+              className="flex flex-col items-center gap-0.5 rounded-md bg-surface-high px-2 py-3 text-xs font-bold text-on-surface hover:bg-surface-highest disabled:opacity-40"
+            >
+              {RESOURCE_LABELS[r]}
+            </button>
+          ))}
+        </div>
+      </Card>
+    </div>,
+    document.body
+  );
+}
+
+// ---------- Generic resource picker (Monopoly) --------------------------
+
+function ResourcePickerModal({ title, body, onPick, onCancel }) {
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/50 backdrop-blur-sm px-4">
+      <Card tone="surface" className="w-full max-w-sm flex flex-col gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-on-surface">{title}</h2>
+          <p className="text-sm text-on-surface-variant mt-1">{body}</p>
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          {RESOURCE_ORDER.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => onPick(r)}
+              className="flex flex-col items-center gap-0.5 rounded-md bg-surface-high px-2 py-3 text-xs font-bold text-on-surface hover:bg-surface-highest"
+            >
+              {RESOURCE_LABELS[r]}
+            </button>
+          ))}
+        </div>
+        <Button variant="tertiary" onClick={onCancel}>Cancel</Button>
+      </Card>
+    </div>,
+    document.body
   );
 }
 
