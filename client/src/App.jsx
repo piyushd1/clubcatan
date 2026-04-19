@@ -14,7 +14,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { io } from 'socket.io-client';
+import { io } from './lib/socket-shim'; // TEMP: replaced by partysocket in Phase 1.11
 import Lobby from './components/Lobby';
 import GameBoard from './components/GameBoard';
 import './App.css';
