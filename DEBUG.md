@@ -3,6 +3,13 @@
 `main` is production-clean: no debug overlays, no `scripts/`, no diagnostic
 tooling. This branch (`debug`) holds everything we use to investigate bugs.
 
+> **Stale-bundle caveat.** If a Shift+D badge or the debug overlay ever
+> appears on the live URL (`clubcatan.*.partykit.dev`), it's a stale cached
+> bundle in the browser, not a leak. Clear site data: Chrome DevTools →
+> Application → Storage → Clear site data. On iOS Safari: Settings → Safari
+> → Advanced → Website Data → remove the partykit entry. Main has been
+> audited and contains no debug imports.
+
 ## What lives here
 
 | Path | Purpose |
