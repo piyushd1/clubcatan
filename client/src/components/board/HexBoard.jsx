@@ -76,7 +76,9 @@ export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClic
       {/* GROUP-A: hex tiles + number tokens */}
       <g>
         {hexes.map((h) => {
-          const hKey = `h_${h.q}_${h.r}`;
+          // Engine's hexKey() returns `${q},${r}` (NOT `h_q_r` — that bit us
+          // when moveRobber started rejecting every hex as invalid).
+          const hKey = `${h.q},${h.r}`;
           const isRobber = game.robber === hKey;
           const highlighted = !!highlights?.hexes?.[hKey];
           return (
