@@ -102,6 +102,23 @@ export default class ClubCatanServer {
     if (conn) this.sendTo(conn, data);
   }
 
+  /**
+   * If the longest-road / largest-army holder changed after a GameLogic call,
+   * emit a single `achievementChanged` event for all clients. Both `prior` and
+   * `next` are player indices (or null). We convert to player IDs so the
+   * client doesn't need to know the player array order.
+   */
+  maybeBroadcastAchievement(kind, prior, next) {
+    if (prior === next) return;
+    const indexToId = (idx) => (idx == null ? null : this.game.players[idx]?.id ?? null);
+    this.broadcast({
+      type: 'achievementChanged',
+      kind,
+      previousHolderId: indexToId(prior),
+      newHolderId: indexToId(next),
+    });
+  }
+
   broadcastGameState() {
     if (!this.game) return;
     for (const player of this.game.players) {
@@ -336,9 +353,11 @@ const HANDLERS = {
     const playerId = this.requirePlayer(conn, ackId);
     const game = this.requireGame(conn, ackId);
     if (!playerId || !game) return;
+    const priorLongestRoad = game.longestRoadPlayer;
     const result = GameLogic.placeRoad(game, playerId, edgeKey, isSetup, lastSettlement);
     if (result.success) {
       this.broadcast({ type: 'roadPlaced', edgeKey, playerId });
+      this.maybeBroadcastAchievement('longestRoad', priorLongestRoad, game.longestRoadPlayer);
       this.broadcastGameState();
     }
     this.ack(conn, ackId, result.success, result.success ? result : result.error);
@@ -373,9 +392,11 @@ const HANDLERS = {
     const playerId = this.requirePlayer(conn, ackId);
     const game = this.requireGame(conn, ackId);
     if (!playerId || !game) return;
+    const priorLargestArmy = game.largestArmyPlayer;
     const result = GameLogic.playDevCard(game, playerId, cardType, params);
     if (result.success) {
       this.broadcast({ type: 'devCardPlayed', cardType, playerId });
+      this.maybeBroadcastAchievement('largestArmy', priorLargestArmy, game.largestArmyPlayer);
       this.broadcastGameState();
     }
     this.ack(conn, ackId, result.success, result.success ? result : result.error);

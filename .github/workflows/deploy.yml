@@ -42,6 +42,12 @@ jobs:
 
       - name: Deploy to PartyKit
         env:
-          # Non-interactive auth for the PartyKit CLI.
+          # Non-interactive auth for the PartyKit CLI. Both are required:
+          #   PARTYKIT_LOGIN  — your PartyKit username (the subdomain segment,
+          #                     e.g. `piyushd1` in clubcatan.piyushd1.partykit.dev).
+          #   PARTYKIT_TOKEN  — the long token from `npx partykit token generate`.
+          # Omitting either makes the CLI fall back to an interactive OAuth
+          # flow, which hangs forever on CI.
           PARTYKIT_LOGIN: ${{ secrets.PARTYKIT_LOGIN }}
+          PARTYKIT_TOKEN: ${{ secrets.PARTYKIT_TOKEN }}
         run: npx partykit deploy
