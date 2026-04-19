@@ -71,6 +71,16 @@ function placeSettlementDirectly(game, playerIndex, vertexKey) {
   game.players[playerIndex].victoryPoints++;
 }
 
+// Null out every hex's number + resource so that the random board doesn't
+// contribute stray gains to the vertex under test. Each resource-distribution
+// test then reintroduces only the specific hexes it cares about.
+function quietBoard(game) {
+  for (const hex of Object.values(game.hexes)) {
+    hex.number = null;
+    hex.resource = null;
+  }
+}
+
 // =============================================================================
 // TEST SECTION 1: LONGEST ROAD EDGE CASES
 // =============================================================================
@@ -304,7 +314,8 @@ function testResourceDistribution() {
   {
     const game = createTestGame();
     game.phase = 'playing';
-    
+    quietBoard(game);
+
     // Setup: Two adjacent hexes with same resource and same number
     // Use correct hex key format: `${q},${r}`
     game.hexes['0,0'] = { q: 0, r: 0, terrain: 'forest', resource: 'lumber', number: 8 };
@@ -334,7 +345,8 @@ function testResourceDistribution() {
   {
     const game = createTestGame();
     game.phase = 'playing';
-    
+    quietBoard(game);
+
     game.hexes['0,0'] = { q: 0, r: 0, terrain: 'forest', resource: 'lumber', number: 6 };
     game.robber = '2,0';
     
@@ -352,7 +364,8 @@ function testResourceDistribution() {
   {
     const game = createTestGame();
     game.phase = 'playing';
-    
+    quietBoard(game);
+
     // Two adjacent hexes with same resource and number
     game.hexes['0,0'] = { q: 0, r: 0, terrain: 'forest', resource: 'lumber', number: 9 };
     game.hexes['1,0'] = { q: 1, r: 0, terrain: 'forest', resource: 'lumber', number: 9 };
@@ -374,7 +387,8 @@ function testResourceDistribution() {
     const game = createTestGame();
     game.phase = 'playing';
     
-    // Two adjacent hexes with DIFFERENT resources but same number
+    // Two adjacent hexes with DIFFERENT resources but same number.
+    quietBoard(game);
     game.hexes['0,0'] = { q: 0, r: 0, terrain: 'forest', resource: 'lumber', number: 5 };
     game.hexes['1,0'] = { q: 1, r: 0, terrain: 'hills', resource: 'brick', number: 5 };
     game.robber = '2,0';
@@ -398,7 +412,8 @@ function testResourceDistribution() {
   {
     const game = createTestGame();
     game.phase = 'playing';
-    
+    quietBoard(game);
+
     game.hexes['0,0'] = { q: 0, r: 0, terrain: 'forest', resource: 'lumber', number: 4 };
     game.robber = '0,0'; // Robber on this hex
     
