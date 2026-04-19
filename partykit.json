@@ -1,0 +1,10 @@
+{
+  "$schema": "https://www.partykit.io/schema.json",
+  "name": "clubcatan",
+  "main": "party/server.js",
+  "compatibilityDate": "2026-04-19",
+  "serve": {
+    "path": "./client/dist",
+    "singlePageApp": true
+  }
+}

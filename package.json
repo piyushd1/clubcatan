@@ -1,0 +1,17 @@
+{
+  "name": "clubcatan",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mobile-first Catan PWA for friends. Preact + PartyKit on Cloudflare.",
+  "type": "module",
+  "scripts": {
+    "dev:client": "npm --prefix client run dev",
+    "dev:party": "partykit dev",
+    "build": "npm --prefix client run build",
+    "deploy": "npm run build && partykit deploy",
+    "test:logic": "node party/test-game.js && node party/test-edge-cases.js && node party/test-full-game.js && node party/test-longest-road-rigorous.js"
+  },
+  "devDependencies": {
+    "partykit": "^0.0.115"
+  }
+}
