@@ -1,15 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useGameStore } from '../stores/gameStore';
 import { BottomNav, Button, Card, Chip, ResourceHUD } from '../components/ui';
 import { Icons } from '../components/ui/icons';
+import { HexBoard } from '../components/board/HexBoard';
 
-/**
- * Board page scaffold.
- *
- * Phase 1.9: shell is here — top players strip, action FABs, BottomNav, HUD.
- * Phase 1.10: the `<BoardCanvas>` placeholder gets replaced by the gesture-
- * driven SVG hex board. Everything else is already wired to the Zustand store.
- */
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
 const RESOURCE_TINTS = {
   brick: 'secondary',
@@ -30,7 +24,13 @@ const FACTIONS = ['red', 'blue', 'gold', 'green'];
 export function Board({ roomCode, playerId, client, onLeave }) {
   const game = useGameStore((s) => s.game);
   const lastRoll = useGameStore((s) => s.lastRoll);
+  const pushNotification = useGameStore((s) => s.pushNotification);
   const [activeTab, setActiveTab] = useState('board');
+
+  // During setup the client does: tap vertex → server places settlement →
+  // we remember the vKey → tap adjacent edge → server places road →
+  // we auto-advanceSetup. `pendingSetupSettlement` tracks that mid-step.
+  const [pendingSetupSettlement, setPendingSetupSettlement] = useState(null);
 
   const me = useMemo(
     () => game?.players?.find((p) => p.id === playerId) ?? null,
@@ -40,16 +40,83 @@ export function Board({ roomCode, playerId, client, onLeave }) {
   const currentIndex = game?.currentPlayerIndex ?? 0;
   const isMyTurn = players[currentIndex]?.id === playerId;
   const phase = game?.phase ?? 'setup';
+  const myIndex = players.findIndex((p) => p.id === playerId);
 
   const rollDice = async () => {
     try { await client?.call('rollDice'); }
-    catch (err) { console.warn('rollDice failed', err); }
+    catch (err) { pushNotification(err.message || 'Roll failed'); }
   };
 
   const endTurn = async () => {
     try { await client?.call('endTurn'); }
-    catch (err) { console.warn('endTurn failed', err); }
+    catch (err) { pushNotification(err.message || 'Could not end turn'); }
   };
+
+  // -------- Vertex/edge handlers ------------------------------------------
+
+  const onVertexClick = useCallback(
+    async (vKey, vertex) => {
+      if (!client || !isMyTurn) return;
+      if (phase === 'setup') {
+        if (pendingSetupSettlement) {
+          pushNotification('Now place an adjacent road.');
+          return;
+        }
+        try {
+          await client.call('placeSettlement', { vertexKey: vKey });
+          setPendingSetupSettlement(vKey);
+        } catch (err) {
+          pushNotification(err.message || 'Cannot place there');
+        }
+        return;
+      }
+      if (phase === 'playing') {
+        // Tap my own settlement → try to upgrade to city.
+        if (vertex.building === 'settlement' && vertex.owner === myIndex) {
+          try { await client.call('upgradeToCity', { vertexKey: vKey }); }
+          catch (err) { pushNotification(err.message || 'Cannot upgrade'); }
+          return;
+        }
+        // Empty vertex → try to build a new settlement.
+        if (!vertex.building) {
+          try { await client.call('placeSettlement', { vertexKey: vKey }); }
+          catch (err) { pushNotification(err.message || 'Cannot build'); }
+        }
+      }
+    },
+    [client, isMyTurn, phase, pendingSetupSettlement, myIndex, pushNotification]
+  );
+
+  const onEdgeClick = useCallback(
+    async (eKey) => {
+      if (!client || !isMyTurn) return;
+      if (phase === 'setup') {
+        if (!pendingSetupSettlement) {
+          pushNotification('Place a settlement first.');
+          return;
+        }
+        try {
+          await client.call('placeRoad', {
+            edgeKey: eKey,
+            isSetup: true,
+            lastSettlement: pendingSetupSettlement,
+          });
+          setPendingSetupSettlement(null);
+          // Auto-advance setup turn — the server rotates to the next player.
+          try { await client.call('advanceSetup'); }
+          catch (err) { pushNotification(err.message || 'Could not advance'); }
+        } catch (err) {
+          pushNotification(err.message || 'Cannot place road there');
+        }
+        return;
+      }
+      if (phase === 'playing') {
+        try { await client.call('placeRoad', { edgeKey: eKey }); }
+        catch (err) { pushNotification(err.message || 'Cannot build road'); }
+      }
+    },
+    [client, isMyTurn, phase, pendingSetupSettlement, pushNotification]
+  );
 
   return (
     <main className="relative flex min-h-dvh flex-col bg-surface pb-[calc(88px+env(safe-area-inset-bottom))]">
@@ -89,19 +156,36 @@ export function Board({ roomCode, playerId, client, onLeave }) {
         </div>
       </header>
 
-      {/* Board canvas placeholder */}
-      <section className="relative flex-1 px-4 py-4">
-        <BoardCanvas game={game} />
+      {/* Board canvas */}
+      <section className="relative flex-1 px-2 py-2">
+        {game?.hexes ? (
+          <div className="mx-auto max-w-[640px]">
+            <HexBoard
+              game={game}
+              playerId={playerId}
+              onVertexClick={isMyTurn ? onVertexClick : undefined}
+              onEdgeClick={isMyTurn ? onEdgeClick : undefined}
+            />
+          </div>
+        ) : (
+          <EmptyBoard />
+        )}
       </section>
 
       {/* Turn indicator + action row */}
       <section className="relative z-20 px-4 pb-20">
         <Card tone="low" className="mx-auto flex max-w-md flex-col items-center gap-3 text-center">
           <p className="text-xs font-bold uppercase tracking-wider text-on-surface/50">
-            {phase === 'setup' ? 'Preparing for Settlement' : phase === 'ended' ? 'Expedition Ended' : 'Expedition in Progress'}
+            {phase === 'setup' ? 'Preparing for Settlement' : phase === 'finished' ? 'Expedition Ended' : 'Expedition in Progress'}
           </p>
           <p className="text-lg font-bold text-on-surface">
-            {isMyTurn ? 'Your move' : `${players[currentIndex]?.name ?? '…'} is planning`}
+            {isMyTurn
+              ? phase === 'setup'
+                ? pendingSetupSettlement
+                  ? 'Tap an adjacent edge to place your road'
+                  : 'Tap a vertex to place your settlement'
+                : 'Your move'
+              : `${players[currentIndex]?.name ?? '…'} is planning`}
           </p>
           {lastRoll?.total ? (
             <p className="text-sm text-on-surface-variant">
@@ -109,12 +193,23 @@ export function Board({ roomCode, playerId, client, onLeave }) {
             </p>
           ) : null}
 
-          {isMyTurn && phase !== 'setup' ? (
+          {isMyTurn && phase === 'playing' ? (
             <div className="flex w-full gap-2">
-              <Button className="flex-1" icon={<Icons.Dice size={18} />} onClick={rollDice} disabled={!!lastRoll && lastRoll?.playerId === playerId}>
+              <Button
+                className="flex-1"
+                icon={<Icons.Dice size={18} />}
+                onClick={rollDice}
+                disabled={!!game?.hasRolledThisTurn}
+              >
                 Roll
               </Button>
-              <Button className="flex-1" variant="secondary" icon={<Icons.Check size={16} />} onClick={endTurn}>
+              <Button
+                className="flex-1"
+                variant="secondary"
+                icon={<Icons.Check size={16} />}
+                onClick={endTurn}
+                disabled={!game?.hasRolledThisTurn}
+              >
                 End Turn
               </Button>
             </div>
@@ -176,18 +271,14 @@ function PlayerPip({ player, faction, isTurn, isYou }) {
   );
 }
 
-function BoardCanvas({ game }) {
+function EmptyBoard() {
   return (
-    <Card tone="low" className="flex min-h-[300px] items-center justify-center">
-      <div className="text-center">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-          <Icons.Grid size={28} />
+    <Card tone="low" className="flex min-h-[280px] items-center justify-center text-center">
+      <div>
+        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+          <Icons.Grid size={24} />
         </div>
-        <p className="text-sm font-bold uppercase tracking-wider text-on-surface/60">Hex Board</p>
-        <p className="mt-1 text-xs text-on-surface-variant">
-          {game?.board?.hexes?.length ?? 0} hexes · {game?.players?.length ?? 0} players
-        </p>
-        <p className="mt-2 text-xs text-on-surface/40">The tactile board lands in Phase 1.10</p>
+        <p className="text-sm text-on-surface-variant">Generating the isles…</p>
       </div>
     </Card>
   );

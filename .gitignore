@@ -39,3 +39,7 @@ coverage/
 .partykit/
 .claude/
 
+# Local design references (screenshots, DESIGN.md from inspiration projects).
+# Kept out of version control since they're ~2MB of images and not runtime code.
+images-inspiration/
+

@@ -14,7 +14,7 @@ export function Landing({ defaultName = '', onCreate, onJoin, busy, error }) {
   const [name, setName] = useState(defaultName);
   const [code, setCode] = useState('');
   const [extended, setExtended] = useState(false);
-  const [specialBuild, setSpecialBuild] = useState(true);
+  const [specialBuild, setSpecialBuild] = useState(false);
 
   const canSubmit =
     name.trim().length > 0 &&
@@ -24,7 +24,12 @@ export function Landing({ defaultName = '', onCreate, onJoin, busy, error }) {
     e.preventDefault();
     if (!canSubmit || busy) return;
     if (mode === 'create') {
-      onCreate({ playerName: name.trim(), isExtended: extended, enableSpecialBuild: specialBuild });
+      // Special Building only applies in 5-6 player expansion. Force off for base.
+      onCreate({
+        playerName: name.trim(),
+        isExtended: extended,
+        enableSpecialBuild: extended ? specialBuild : false,
+      });
     } else {
       onJoin({ roomCode: code.trim().toUpperCase(), playerName: name.trim() });
     }
@@ -92,16 +97,19 @@ export function Landing({ defaultName = '', onCreate, onJoin, busy, error }) {
               ) : (
                 <div className="flex flex-col gap-3">
                   <Toggle
-                    label="5-6 player mode"
-                    hint="Use the extended board and card set."
+                    label="5-6 player board"
+                    hint="Use the extended map. Base game otherwise."
                     checked={extended}
                     onChange={setExtended}
                   />
                   <Toggle
                     label="Special Building phase"
-                    hint="Between turns, others may build."
-                    checked={specialBuild}
+                    hint={extended
+                      ? 'Between turns, others may build with their own resources.'
+                      : 'Only available in 5-6 player mode.'}
+                    checked={extended && specialBuild}
                     onChange={setSpecialBuild}
+                    disabled={!extended}
                   />
                 </div>
               )}
@@ -128,13 +136,17 @@ function Field({ label, children }) {
   );
 }
 
-function Toggle({ label, hint, checked, onChange }) {
+function Toggle({ label, hint, checked, onChange, disabled = false }) {
   return (
     <button
       type="button"
-      onClick={() => onChange(!checked)}
+      onClick={() => !disabled && onChange(!checked)}
       aria-pressed={checked}
-      className="flex items-center justify-between gap-4 rounded-md bg-surface p-3 text-left transition-colors hover:bg-surface-container"
+      aria-disabled={disabled}
+      disabled={disabled}
+      className={`flex items-center justify-between gap-4 rounded-md bg-surface p-3 text-left transition-colors ${
+        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-container cursor-pointer'
+      }`}
     >
       <span className="flex flex-col gap-0.5">
         <span className="text-sm font-bold text-on-surface">{label}</span>
