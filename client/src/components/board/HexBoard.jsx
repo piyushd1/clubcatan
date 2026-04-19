@@ -71,7 +71,12 @@ export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClic
       viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`}
       preserveAspectRatio="xMidYMid meet"
       className="block w-full h-auto max-h-[min(70dvh,720px)] select-none"
-      style={{ touchAction: 'none' }}
+      style={{
+        // `touchAction: none` will come back when Phase 1.10c wires pinch/pan
+        // gestures. Until then, letting the browser handle `pan-y` means users
+        // can scroll the page with a vertical swipe on the board area.
+        touchAction: 'pan-y',
+      }}
     >
       {/* GROUP-A: hex tiles + number tokens */}
       <g>

@@ -81,6 +81,7 @@ export function Lobby({ roomCode, playerId, onStart, onLeave, onCopy, busy }) {
                 <PlayerRow
                   key={p.id}
                   player={p}
+                  seatIndex={i}
                   isYou={p.id === playerId}
                   isHost={i === 0}
                 />
@@ -125,8 +126,10 @@ function SettingRow({ label, value }) {
 
 const FACTIONS = ['red', 'blue', 'gold', 'green'];
 
-function PlayerRow({ player, isYou, isHost }) {
-  const faction = FACTIONS[player.seatIndex ?? 0] ?? 'red';
+function PlayerRow({ player, seatIndex, isYou, isHost }) {
+  // seatIndex comes from the player's position in game.players[] — the server
+  // doesn't stamp a seatIndex on the player object, so we derive it here.
+  const faction = FACTIONS[seatIndex ?? 0] ?? 'red';
   const initial = (player.name?.[0] ?? '?').toUpperCase();
   return (
     <div className="relative overflow-hidden rounded-xl bg-surface-low p-3 pl-5">
