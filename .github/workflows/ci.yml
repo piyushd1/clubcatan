@@ -1,0 +1,35 @@
+name: CI
+
+# Runs on every push (including debug) and every pull request.
+# Keeps PR merges blocked until the check is green.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # Cache npm for both package.json files. Keys off the two lockfiles.
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install root deps (partykit CLI)
+        run: npm ci
+
+      - name: Install client deps
+        run: npm ci --prefix client
+
+      - name: Build client bundle
+        run: npm run build
+
+      - name: Run gameLogic tests
+        run: npm run test:logic

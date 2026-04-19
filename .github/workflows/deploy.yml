@@ -1,0 +1,47 @@
+name: Deploy
+
+# Only runs after a merge into main. Builds again + runs tests again before
+# pushing to PartyKit — belt-and-suspenders with CI since this is the last
+# gate before live traffic.
+on:
+  push:
+    branches: [main]
+
+# Prevent overlapping deploys if multiple merges land in quick succession:
+# the newer one waits for the older one to finish, the cancelled-in-progress
+# flag keeps only the latest commit in the queue.
+concurrency:
+  group: partykit-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install client deps
+        run: npm ci --prefix client
+
+      - name: Build client bundle
+        run: npm run build
+
+      - name: Run gameLogic tests
+        run: npm run test:logic
+
+      - name: Deploy to PartyKit
+        env:
+          # Non-interactive auth for the PartyKit CLI.
+          PARTYKIT_LOGIN: ${{ secrets.PARTYKIT_LOGIN }}
+        run: npx partykit deploy
