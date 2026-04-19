@@ -16,6 +16,7 @@ import {
   upsertRecentRoom,
   clearActiveGame,
 } from './lib/cache';
+import DebugOverlay, { recordIncomingMessage } from './debug/DebugOverlay';
 import './App.css';
 
 const SESSION_KEY = 'clubcatan:session';
@@ -59,6 +60,12 @@ function App() {
   const { client, status } = useRoom(session?.roomCode);
   const clientRef = useRef(null);
   useEffect(() => { clientRef.current = client; }, [client]);
+
+  // DEBUG-ONLY tap: record every incoming message for the overlay.
+  useEffect(() => {
+    if (!client) return undefined;
+    return client.onAny(recordIncomingMessage);
+  }, [client]);
   const game = useGameStore((s) => s.game);
   const setGame = useGameStore((s) => s.setGame);
   const notifications = useGameStore((s) => s.notifications);
@@ -247,6 +254,7 @@ function App() {
         />
         {createPortal(<PWAInstallHint />, document.body)}
         <NotificationsOverlay items={notifications} />
+        <DebugOverlay session={session} wsStatus={status} />
       </>
     );
   }
