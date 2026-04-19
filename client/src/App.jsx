@@ -152,6 +152,10 @@ function App() {
     }
   }, [setGame]);
 
+  // When a join is rejected because the game's already underway, we surface
+  // a "Spectate instead?" prompt rather than bouncing back to Landing.
+  const [spectatePrompt, setSpectatePrompt] = useState(null);
+
   const handleJoin = useCallback(async ({ roomCode, playerName }) => {
     setBusy(true);
     setError(null);
@@ -170,14 +174,51 @@ function App() {
       await saveActiveGame(roomCode, result.gameState);
       await upsertRecentRoom({ code: roomCode });
     } catch (err) {
-      setError(err?.message || 'Could not join expedition');
+      const msg = err?.message || 'Could not join expedition';
+      if (msg.startsWith('already_started:')) {
+        // Don't tear down the session yet — we still have the open socket.
+        // Ask the user if they want to spectate; handleSpectate or Cancel
+        // finalizes the flow.
+        setSpectatePrompt({ roomCode, playerName });
+      } else {
+        setError(msg);
+        await leaveRoom();
+        setSession(null);
+        saveSession(null);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [setGame]);
+
+  const handleSpectate = useCallback(async () => {
+    if (!spectatePrompt) return;
+    const { roomCode, playerName } = spectatePrompt;
+    setSpectatePrompt(null);
+    setBusy(true);
+    try {
+      const c = clientRef.current;
+      const result = await c.call('joinAsSpectator', { playerName });
+      if (result?.gameState) setGame(result.gameState);
+      const spectSession = { roomCode, playerId: null, name: playerName, spectator: true };
+      setSession(spectSession);
+      saveSession(spectSession);
+    } catch (err) {
+      setError(err?.message || 'Could not spectate');
       await leaveRoom();
       setSession(null);
       saveSession(null);
     } finally {
       setBusy(false);
     }
-  }, [setGame]);
+  }, [spectatePrompt, setGame]);
+
+  const cancelSpectatePrompt = useCallback(async () => {
+    setSpectatePrompt(null);
+    await leaveRoom();
+    setSession(null);
+    saveSession(null);
+  }, []);
 
   const handleLeave = useCallback(async () => {
     if (session?.roomCode) await clearActiveGame(session.roomCode);
@@ -234,6 +275,24 @@ function App() {
   }, [session, invitedCode]);
 
   // ---- Render ----
+  const phase = game?.phase;
+
+  // Global overlays — render regardless of which screen is below.
+  const overlays = (
+    <>
+      {spectatePrompt ? (
+        <SpectatePrompt
+          name={spectatePrompt.playerName}
+          onSpectate={handleSpectate}
+          onCancel={cancelSpectatePrompt}
+          busy={busy}
+        />
+      ) : null}
+      {createPortal(<PWAInstallHint />, document.body)}
+      <NotificationsOverlay items={notifications} />
+    </>
+  );
+
   if (!session?.roomCode) {
     return (
       <>
@@ -245,13 +304,10 @@ function App() {
           onCreate={handleCreate}
           onJoin={handleJoin}
         />
-        {createPortal(<PWAInstallHint />, document.body)}
-        <NotificationsOverlay items={notifications} />
+        {overlays}
       </>
     );
   }
-
-  const phase = game?.phase;
 
   // While we have a session but haven't received the first gameState yet
   // (fresh create/join or a cold-DO reconnect), don't flash an empty Lobby
@@ -260,13 +316,13 @@ function App() {
     return (
       <>
         <ConnectingCard code={session.roomCode} status={status} onLeave={handleLeave} />
-        {createPortal(<PWAInstallHint />, document.body)}
-        <NotificationsOverlay items={notifications} />
+        {overlays}
       </>
     );
   }
 
-  const inLobby = phase === 'waiting';
+  // Spectators jump straight to the Board — they never see Lobby.
+  const inLobby = phase === 'waiting' && !session.spectator;
 
   return (
     <>
@@ -285,11 +341,42 @@ function App() {
           playerId={session.playerId}
           client={client}
           onLeave={handleLeave}
+          spectator={!!session.spectator}
         />
       )}
-      {createPortal(<PWAInstallHint />, document.body)}
-      <NotificationsOverlay items={notifications} />
+      {overlays}
     </>
+  );
+}
+
+function SpectatePrompt({ name, onSpectate, onCancel, busy }) {
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/50 backdrop-blur-sm px-4">
+      <div className="w-full max-w-sm bg-surface rounded-xl p-6 shadow-ambient flex flex-col gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-on-surface/50">Expedition in Progress</p>
+          <h2 className="text-xl font-bold text-on-surface mt-1">This game has already started.</h2>
+          <p className="text-sm text-on-surface-variant mt-2">
+            You can still watch. Spectators see the board and moves but can't take actions.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded-xl px-4 py-2 text-sm font-bold text-on-surface-variant hover:bg-surface-container disabled:opacity-40"
+          >Cancel</button>
+          <button
+            type="button"
+            onClick={onSpectate}
+            disabled={busy}
+            className="rounded-xl bg-primary px-5 py-2 text-sm font-extrabold text-on-primary shadow-ambient disabled:opacity-40"
+          >{busy ? 'Joining…' : `Watch as ${name || 'spectator'}`}</button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 

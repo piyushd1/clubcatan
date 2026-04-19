@@ -29,6 +29,10 @@ export default class ClubCatanServer {
     this.game = null;
     this.playerByConn = new Map(); // connectionId -> playerId
     this.connByPlayer = new Map(); // playerId -> connectionId
+    // Spectators join once the game is already running. They receive gameState
+    // updates but their hands/dev cards aren't rendered (we send the
+    // no-player view). Cap at 4 to bound fan-out.
+    this.spectatorsByConn = new Map(); // connectionId -> { name }
   }
 
   // ---------- connection lifecycle ----------
@@ -38,6 +42,11 @@ export default class ClubCatanServer {
   }
 
   onClose(conn) {
+    // Spectator disconnect — just drop them; no announcement needed.
+    if (this.spectatorsByConn.has(conn.id)) {
+      this.spectatorsByConn.delete(conn.id);
+      return;
+    }
     const playerId = this.playerByConn.get(conn.id);
     this.playerByConn.delete(conn.id);
     if (!playerId) return;
@@ -101,6 +110,13 @@ export default class ClubCatanServer {
         state: GameLogic.getPlayerView(this.game, player.id),
       });
     }
+    // Spectators get the null-viewer view — all player hands/dev cards
+    // appear as counts only, myIndex is -1.
+    const spectatorView = GameLogic.getPlayerView(this.game, '__spectator__');
+    for (const connId of this.spectatorsByConn.keys()) {
+      const conn = this.room.getConnection(connId);
+      if (conn) this.sendTo(conn, { type: 'gameState', state: { ...spectatorView, spectator: true } });
+    }
   }
 
   requirePlayer(conn, ackId) {
@@ -154,7 +170,13 @@ const HANDLERS = {
     if (!game) return;
     const playerId = crypto.randomUUID();
     const result = GameLogic.addPlayer(game, { id: playerId, name: playerName });
-    if (!result.success) return this.ack(conn, ackId, false, result.error);
+    if (!result.success) {
+      // Signal to the client that spectating is a possibility when a join is
+      // rejected because the game has already started. The client shows a
+      // "Spectate instead?" prompt when it sees this code.
+      const reason = result.error === 'Game already started' ? 'already_started' : undefined;
+      return this.ack(conn, ackId, false, reason ? `already_started: ${result.error}` : result.error);
+    }
     this.playerByConn.set(conn.id, playerId);
     this.connByPlayer.set(playerId, conn.id);
     this.ack(conn, ackId, true, {
@@ -164,6 +186,25 @@ const HANDLERS = {
     });
     this.broadcast({ type: 'playerJoined', playerName });
     this.broadcastGameState();
+  },
+
+  joinAsSpectator(conn, { playerName }, ackId) {
+    const game = this.requireGame(conn, ackId);
+    if (!game) return;
+    if (game.phase === 'waiting') {
+      return this.ack(conn, ackId, false, 'Game has not started yet — join as a player instead');
+    }
+    const MAX_SPECTATORS = 4;
+    if (this.spectatorsByConn.size >= MAX_SPECTATORS) {
+      return this.ack(conn, ackId, false, 'Spectator slots are full');
+    }
+    this.spectatorsByConn.set(conn.id, { name: playerName });
+    const view = GameLogic.getPlayerView(game, '__spectator__');
+    this.ack(conn, ackId, true, {
+      gameCode: this.room.id,
+      gameState: { ...view, spectator: true },
+    });
+    this.broadcast({ type: 'spectatorJoined', name: playerName });
   },
 
   reconnect(conn, { playerId }, ackId) {

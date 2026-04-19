@@ -22,7 +22,7 @@ const RESOURCE_LABELS = {
 };
 const FACTIONS = ['red', 'blue', 'gold', 'green'];
 
-export function Board({ roomCode, playerId, client, onLeave }) {
+export function Board({ roomCode, playerId, client, onLeave, spectator = false }) {
   const game = useGameStore((s) => s.game);
   const lastRoll = useGameStore((s) => s.lastRoll);
   const pushNotification = useGameStore((s) => s.pushNotification);
@@ -36,15 +36,15 @@ export function Board({ roomCode, playerId, client, onLeave }) {
   const [stealChooser, setStealChooser] = useState(null);
 
   const me = useMemo(
-    () => game?.players?.find((p) => p.id === playerId) ?? null,
-    [game, playerId]
+    () => (spectator ? null : game?.players?.find((p) => p.id === playerId) ?? null),
+    [game, playerId, spectator]
   );
   const players = game?.players ?? [];
   const currentIndex = game?.currentPlayerIndex ?? 0;
-  const isMyTurn = players[currentIndex]?.id === playerId;
+  const isMyTurn = !spectator && players[currentIndex]?.id === playerId;
   const phase = game?.phase ?? 'setup';
   const turnPhase = game?.turnPhase ?? 'roll';
-  const myIndex = players.findIndex((p) => p.id === playerId);
+  const myIndex = spectator ? -1 : players.findIndex((p) => p.id === playerId);
 
   // When a 7 is rolled, the server sets `discardingPlayers` for anyone with
   // >7 cards. If I'm in that list, open the discard dialog.
@@ -188,6 +188,12 @@ export function Board({ roomCode, playerId, client, onLeave }) {
             <PlayerPip key={p.id} player={p} faction={FACTIONS[i] ?? 'red'} isTurn={i === currentIndex} isYou={p.id === playerId} />
           ))}
         </div>
+
+        {spectator ? (
+          <div className="mt-3 rounded-full bg-primary/10 text-primary text-[11px] font-extrabold uppercase tracking-[0.2em] px-4 py-1.5 text-center">
+            Spectating — read only
+          </div>
+        ) : null}
       </header>
 
       <section className="relative flex-1 px-2 py-2">
