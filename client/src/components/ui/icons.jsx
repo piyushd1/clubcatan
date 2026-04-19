@@ -43,6 +43,44 @@ export const Icons = {
   Book: ({ size = 20, ...p }) => base(<><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20v3H6.5A2.5 2.5 0 0 1 4 17.5z" /><path d="M6.5 2H20v15H6.5A2.5 2.5 0 0 1 4 14.5v-10A2.5 2.5 0 0 1 6.5 2z" /></>, size, p),
   X: ({ size = 20, ...p }) => base(<><path d="M18 6L6 18" /><path d="M6 6l12 12" /></>, size, p),
   UserPlus: ({ size = 20, ...p }) => base(<><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" /></>, size, p),
+
+  // ---- Resource glyphs (#9). Each draws in currentColor so a parent
+  // text-secondary / text-primary tint cascades onto the icon. Keep lines
+  // simple — these render at 14-20px.
+  // Brick: a stacked wall.
+  Brick: ({ size = 20, ...p }) => base(
+    <><rect x="3" y="5" width="18" height="5" rx="1" /><rect x="3" y="14" width="18" height="5" rx="1" /><line x1="9" y1="5" x2="9" y2="10" /><line x1="15" y1="5" x2="15" y2="10" /><line x1="6" y1="14" x2="6" y2="19" /><line x1="12" y1="14" x2="12" y2="19" /><line x1="18" y1="14" x2="18" y2="19" /></>,
+    size, p
+  ),
+  // Wood (lumber): a conifer.
+  Wood: ({ size = 20, ...p }) => base(
+    <><path d="M12 3l5 7h-3l4 6h-3l3 5H6l3-5H6l4-6H7z" /><line x1="12" y1="21" x2="12" y2="17" /></>,
+    size, p
+  ),
+  // Sheep (wool): a rounded silhouette with ears + legs.
+  Sheep: ({ size = 20, ...p }) => base(
+    <><circle cx="12" cy="12" r="5" /><circle cx="7" cy="10" r="1.5" /><circle cx="17" cy="10" r="1.5" /><line x1="9" y1="17" x2="9" y2="20" /><line x1="15" y1="17" x2="15" y2="20" /></>,
+    size, p
+  ),
+  // Hay (grain): a wheat sheaf.
+  Hay: ({ size = 20, ...p }) => base(
+    <><path d="M12 3v18" /><path d="M12 7c-3-1-5 1-5 4" /><path d="M12 7c3-1 5 1 5 4" /><path d="M12 12c-3-1-5 1-5 4" /><path d="M12 12c3-1 5 1 5 4" /></>,
+    size, p
+  ),
+  // Ore: a rough mountain peak.
+  Ore: ({ size = 20, ...p }) => base(
+    <><path d="M2 20l7-11 4 5 3-4 6 10z" /><path d="M9 9l4 5" /></>,
+    size, p
+  ),
+};
+
+// Convenient map from resource id → icon component (for data-driven rows).
+export const ResourceIcons = {
+  brick: Icons.Brick,
+  lumber: Icons.Wood,
+  wool: Icons.Sheep,
+  grain: Icons.Hay,
+  ore: Icons.Ore,
 };
 
 export default Icons;

@@ -41,7 +41,7 @@ const TERRAIN_LABEL_FILL = {
 // Six faction colors — mapped by seat index. Matches the Lobby's FACTIONS list.
 const FACTION_COLORS = ['#9c4323', '#3b5f7a', '#a48a2e', '#154212', '#6b3b7a', '#2f7a73'];
 
-export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClick, onHexClick }) {
+export function HexBoard({ game, playerId, highlights, pending, onVertexClick, onEdgeClick, onHexClick }) {
   if (!game?.hexes) return null;
 
   const hexes = useMemo(() => Object.values(game.hexes), [game.hexes]);
@@ -70,11 +70,11 @@ export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClic
       aria-label="Catan board"
       viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`}
       preserveAspectRatio="xMidYMid meet"
-      className="block w-full h-auto max-h-[min(70dvh,720px)] select-none"
+      className="block w-full h-auto max-h-[min(58dvh,640px)] select-none"
       style={{
-        // `touchAction: none` will come back when Phase 1.10c wires pinch/pan
-        // gestures. Until then, letting the browser handle `pan-y` means users
-        // can scroll the page with a vertical swipe on the board area.
+        // Let vertical swipes reach the page scroller (#4). Pinch/pan lands
+        // in a later pass and will switch this to `none` with an explicit
+        // gesture library.
         touchAction: 'pan-y',
       }}
     >
@@ -111,6 +111,13 @@ export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClic
         {hexes.map((h) => (h.number ? <NumberToken key={`n_${h.q}_${h.r}`} hex={h} /> : null))}
       </g>
 
+      {/* GROUP-C2: port markers (rendered above tiles, below buildings). */}
+      {Array.isArray(game.ports) ? (
+        <g>
+          {game.ports.map((p, idx) => <PortMarker key={`port_${idx}`} port={p} hexes={game.hexes} />)}
+        </g>
+      ) : null}
+
       {/* GROUP-D: robber */}
       {robberHex ? <Robber hex={robberHex} /> : null}
 
@@ -120,6 +127,18 @@ export function HexBoard({ game, playerId, highlights, onVertexClick, onEdgeClic
           <Building key={vKey} vKey={vKey} v={v} />
         ))}
       </g>
+
+      {/* GROUP-E2: ghost pending placements (Phase 1.10 Confirm Move #7) */}
+      {pending?.vertex ? (
+        <GhostBuilding
+          vKey={pending.vertex}
+          kind={pending.vertexKind ?? 'settlement'}
+          ownerIndex={pending.ownerIndex ?? 0}
+        />
+      ) : null}
+      {pending?.edge ? (
+        <GhostRoad eKey={pending.edge} ownerIndex={pending.ownerIndex ?? 0} />
+      ) : null}
 
       {/* GROUP-F: interactive overlay (edges first so vertex hit-discs win on overlap) */}
       {onEdgeClick ? (
@@ -292,6 +311,70 @@ function dotsForNumber(n) {
 
 // ---------- Robber ----------------------------------------------------------
 
+// ---------- Port marker -----------------------------------------------
+// Each port has two vertex keys. We draw a small rounded badge at the
+// midpoint, shifted outward along the vector from the hexes' center so
+// the marker sits on the water side of the board edge.
+
+const PORT_BADGE = {
+  GENERIC: { ratio: '3:1', glyph: '⚓' },
+  BRICK:   { ratio: '2:1', glyph: '🧱' },
+  LUMBER:  { ratio: '2:1', glyph: '🌲' },
+  WOOL:    { ratio: '2:1', glyph: '🐑' },
+  GRAIN:   { ratio: '2:1', glyph: '🌾' },
+  ORE:     { ratio: '2:1', glyph: '⛏' },
+};
+
+const PortMarker = memo(function PortMarker({ port, hexes }) {
+  const a = parseVertexKey(port.vertices[0]);
+  const b = parseVertexKey(port.vertices[1]);
+  if (!a || !b) return null;
+  const pa = vertexPixel(a.q, a.r, a.dir, HEX.SIZE);
+  const pb = vertexPixel(b.q, b.r, b.dir, HEX.SIZE);
+  const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+
+  // Vector from board center (0,0 in axial) to midpoint — we offset along
+  // that direction so the badge sits outside the edge.
+  const len = Math.hypot(mid.x, mid.y) || 1;
+  const offset = HEX.SIZE * 0.42;
+  const px = mid.x + (mid.x / len) * offset;
+  const py = mid.y + (mid.y / len) * offset;
+
+  const meta = PORT_BADGE[port.type] ?? PORT_BADGE.GENERIC;
+  const w = HEX.SIZE * 0.56;
+  const h = HEX.SIZE * 0.38;
+
+  return (
+    <g transform={`translate(${px} ${py})`} aria-hidden="true">
+      {/* Dashed lines to each vertex so the port's reach is obvious */}
+      <line x1={pa.x - px} y1={pa.y - py} x2={0} y2={0} stroke="#fafaf3" strokeOpacity={0.9} strokeWidth={2} strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+      <line x1={pb.x - px} y1={pb.y - py} x2={0} y2={0} stroke="#fafaf3" strokeOpacity={0.9} strokeWidth={2} strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h / 2} fill="#fafaf3" stroke="#1a1c18" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+      <text
+        x={-w / 4}
+        y={0}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontFamily='"Manrope Variable", Manrope, system-ui, sans-serif'
+        fontWeight={800}
+        fontSize={HEX.SIZE * 0.2}
+        fill="#1a1c18"
+      >
+        {meta.ratio}
+      </text>
+      <text
+        x={w / 4}
+        y={0}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={HEX.SIZE * 0.22}
+      >
+        {meta.glyph}
+      </text>
+    </g>
+  );
+});
+
 const Robber = memo(function Robber({ hex }) {
   const c = hexToPixel(hex.q, hex.r, HEX.SIZE);
   const s = HEX.SIZE * 0.22;
@@ -381,6 +464,61 @@ const Building = memo(function Building({ vKey, v }) {
         vectorEffect="non-scaling-stroke"
       />
     </g>
+  );
+});
+
+// ---------- Ghost placements (Confirm Move #7) -------------------------
+
+// Dashed, faded faction-colored ghost renders for a user's pending placement
+// that hasn't been committed to the server yet. Confirm commits, tap-elsewhere
+// replaces, tap-same clears.
+
+const GhostBuilding = memo(function GhostBuilding({ vKey, kind, ownerIndex }) {
+  const parsed = parseVertexKey(vKey);
+  if (!parsed) return null;
+  const { x, y } = vertexPixel(parsed.q, parsed.r, parsed.dir, HEX.SIZE);
+  const color = FACTION_COLORS[ownerIndex ?? 0];
+  const isCity = kind === 'city';
+  const s = HEX.SIZE * (isCity ? 0.22 : 0.18);
+  const housePoints = `${-s},${s * 0.55} ${-s},${-s * 0.35} 0,${-s * 0.95} ${s},${-s * 0.35} ${s},${s * 0.55}`;
+  return (
+    <g transform={`translate(${x} ${y})`} opacity={0.6}>
+      <polygon
+        points={housePoints}
+        fill={color}
+        fillOpacity={0.35}
+        stroke={color}
+        strokeWidth={2}
+        strokeDasharray="3 2"
+        vectorEffect="non-scaling-stroke"
+      />
+      {isCity ? (
+        <rect x={s * 0.3} y={-s * 0.8} width={s * 0.6} height={s * 0.6}
+          fill={color} fillOpacity={0.35} stroke={color} strokeWidth={2}
+          strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
+      ) : null}
+    </g>
+  );
+});
+
+const GhostRoad = memo(function GhostRoad({ eKey, ownerIndex }) {
+  const parsed = parseEdgeKey(eKey);
+  if (!parsed) return null;
+  const { a, b } = edgeEndpoints(parsed.q, parsed.r, parsed.dir, HEX.SIZE);
+  const color = FACTION_COLORS[ownerIndex ?? 0];
+  return (
+    <line
+      x1={a.x}
+      y1={a.y}
+      x2={b.x}
+      y2={b.y}
+      stroke={color}
+      strokeOpacity={0.55}
+      strokeWidth={7}
+      strokeLinecap="round"
+      strokeDasharray="5 4"
+      vectorEffect="non-scaling-stroke"
+    />
   );
 });
 
