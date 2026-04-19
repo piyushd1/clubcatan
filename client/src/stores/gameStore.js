@@ -67,6 +67,28 @@ export const useGameStore = create((set, get) => ({
         d.game = msg.state;
         return;
 
+      case 'achievementChanged': {
+        // Broadcast when longest road / largest army changes hands. Renders
+        // as a self-dismissing toast so every player knows the VP shift.
+        const kindLabel = msg.kind === 'longestRoad' ? 'Longest Road' : 'Largest Army';
+        const newName = d.game?.players?.find((p) => p.id === msg.newHolderId)?.name;
+        const prevName = d.game?.players?.find((p) => p.id === msg.previousHolderId)?.name;
+        let message;
+        if (newName && prevName) message = `${newName} took ${kindLabel} from ${prevName}`;
+        else if (newName) message = `${newName} claims ${kindLabel}`;
+        else if (prevName) message = `${prevName} lost ${kindLabel}`;
+        else message = `${kindLabel} is contested`;
+        const id = Date.now() + Math.random();
+        d.notifications.push({ id, message });
+        // Self-cleanup — the 4-second window matches pushNotification's default.
+        setTimeout(() => {
+          useGameStore.setState((s) =>
+            mutate(s, (dd) => { dd.notifications = dd.notifications.filter((n) => n.id !== id); })
+          );
+        }, 4000);
+        return;
+      }
+
       case 'diceRolled':
         d.lastRoll = { total: msg.roll?.total ?? null, dice: msg.roll?.dice ?? null, playerId: msg.playerId };
         return;

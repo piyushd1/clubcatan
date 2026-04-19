@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGameStore } from '../stores/gameStore';
 import { BottomNav, Button, Card, Chip, ResourceHUD } from '../components/ui';
-import { Icons } from '../components/ui/icons';
+import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
 
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
@@ -17,7 +17,17 @@ const RESOURCE_LABELS = {
   brick: 'Brick',
   lumber: 'Wood',
   wool: 'Sheep',
-  grain: 'Wheat',
+  grain: 'Hay',
+  ore: 'Ore',
+};
+
+// Compact 3-letter labels for the always-visible HUD — keeps all five resource
+// chips on a 360px viewport without horizontal scrolling (#9).
+const RESOURCE_SHORT = {
+  brick: 'Bri',
+  lumber: 'Wod',
+  wool: 'Shp',
+  grain: 'Hay',
   ore: 'Ore',
 };
 const FACTIONS = ['red', 'blue', 'gold', 'green'];
@@ -26,11 +36,21 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   const game = useGameStore((s) => s.game);
   const lastRoll = useGameStore((s) => s.lastRoll);
   const pushNotification = useGameStore((s) => s.pushNotification);
+  const pendingSteal = useGameStore((s) => s.pendingSteal);
+  const clearPendingSteal = useGameStore((s) => s.clearPendingSteal);
   const [activeTab, setActiveTab] = useState('board');
 
-  // Setup flow — remember the vertex of the settlement we just placed so we
-  // can feed it to placeRoad as lastSettlement and then advanceSetup.
-  const [pendingSetupSettlement, setPendingSetupSettlement] = useState(null);
+  // Confirm Move (#7) — placements are PROVISIONAL on the client until Confirm.
+  //
+  //   Setup phase:  pendingSetup = { vertex: vKey, edge: eKey }
+  //                 Taps update one or the other; Confirm fires
+  //                 placeSettlement → placeRoad → advanceSetup.
+  //   Main phase:   pendingBuild = { kind: 'settlement'|'city'|'road', key }
+  //                 One pending build at a time. Confirm fires the matching
+  //                 server call. Dev-card / trade / end-turn paths still
+  //                 fire immediately — only placements are two-step.
+  const [pendingSetup, setPendingSetup] = useState({ vertex: null, edge: null });
+  const [pendingBuild, setPendingBuild] = useState(null);
 
   // Steal chooser modal state: null | { hexKey, players: [{id,name,hasResources}] }
   const [stealChooser, setStealChooser] = useState(null);
@@ -54,6 +74,13 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   }, [game, myIndex]);
 
   const isRobberTurn = phase === 'playing' && isMyTurn && turnPhase === 'robber';
+
+  // Clear pending placements whenever turn ownership or phase flips so a
+  // pending ghost doesn't leak into someone else's turn after end-turn.
+  useEffect(() => {
+    setPendingSetup({ vertex: null, edge: null });
+    setPendingBuild(null);
+  }, [phase, currentIndex, spectator]);
 
   // -------- Actions -------------------------------------------------------
 
@@ -102,66 +129,126 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
     [client, game, isRobberTurn, doMoveRobber, pushNotification]
   );
 
+  // Vertex/edge clicks only update pending state. Server calls happen on Confirm.
   const onVertexClick = useCallback(
-    async (vKey, vertex) => {
+    (vKey, vertex) => {
       if (!client || !isMyTurn) return;
       if (phase === 'setup') {
-        if (pendingSetupSettlement) {
-          pushNotification('Now place an adjacent road.');
-          return;
-        }
-        try {
-          await client.call('placeSettlement', { vertexKey: vKey });
-          setPendingSetupSettlement(vKey);
-        } catch (err) {
-          pushNotification(err.message || 'Cannot place there');
-        }
+        // Toggle: tap same vertex again to clear; tap different to replace.
+        setPendingSetup((prev) =>
+          prev.vertex === vKey ? { ...prev, vertex: null } : { ...prev, vertex: vKey }
+        );
         return;
       }
       if (phase !== 'playing') return;
       if (turnPhase === 'robber' || turnPhase === 'discard') return;
-      if (vertex.building === 'settlement' && vertex.owner === myIndex) {
-        try { await client.call('upgradeToCity', { vertexKey: vKey }); }
-        catch (err) { pushNotification(err.message || 'Cannot upgrade'); }
+      // Main phase: own settlement → city upgrade; empty vertex → settlement.
+      if (vertex?.building === 'settlement' && vertex.owner === myIndex) {
+        setPendingBuild((prev) =>
+          prev?.kind === 'city' && prev.key === vKey
+            ? null
+            : { kind: 'city', key: vKey }
+        );
         return;
       }
-      if (!vertex.building) {
-        try { await client.call('placeSettlement', { vertexKey: vKey }); }
-        catch (err) { pushNotification(err.message || 'Cannot build'); }
+      if (!vertex?.building) {
+        setPendingBuild((prev) =>
+          prev?.kind === 'settlement' && prev.key === vKey
+            ? null
+            : { kind: 'settlement', key: vKey }
+        );
       }
     },
-    [client, isMyTurn, phase, turnPhase, pendingSetupSettlement, myIndex, pushNotification]
+    [client, isMyTurn, phase, turnPhase, myIndex]
   );
 
   const onEdgeClick = useCallback(
-    async (eKey) => {
+    (eKey) => {
       if (!client || !isMyTurn) return;
       if (phase === 'setup') {
-        if (!pendingSetupSettlement) {
-          pushNotification('Place a settlement first.');
-          return;
-        }
-        try {
-          await client.call('placeRoad', {
-            edgeKey: eKey,
-            isSetup: true,
-            lastSettlement: pendingSetupSettlement,
-          });
-          setPendingSetupSettlement(null);
-          try { await client.call('advanceSetup'); }
-          catch (err) { pushNotification(err.message || 'Could not advance'); }
-        } catch (err) {
-          pushNotification(err.message || 'Cannot place road there');
-        }
+        setPendingSetup((prev) =>
+          prev.edge === eKey ? { ...prev, edge: null } : { ...prev, edge: eKey }
+        );
         return;
       }
       if (phase !== 'playing') return;
       if (turnPhase === 'robber' || turnPhase === 'discard') return;
-      try { await client.call('placeRoad', { edgeKey: eKey }); }
-      catch (err) { pushNotification(err.message || 'Cannot build road'); }
+      setPendingBuild((prev) =>
+        prev?.kind === 'road' && prev.key === eKey ? null : { kind: 'road', key: eKey }
+      );
     },
-    [client, isMyTurn, phase, turnPhase, pendingSetupSettlement, pushNotification]
+    [client, isMyTurn, phase, turnPhase]
   );
+
+  // ---- Confirm + Reset ---------------------------------------------------
+
+  const resetPending = useCallback(() => {
+    setPendingSetup({ vertex: null, edge: null });
+    setPendingBuild(null);
+  }, []);
+
+  const confirmPlacement = useCallback(async () => {
+    if (!client) return;
+    if (phase === 'setup') {
+      const { vertex, edge } = pendingSetup;
+      if (!vertex || !edge) {
+        pushNotification('Tap a vertex AND an adjacent edge before Confirm.');
+        return;
+      }
+      try {
+        await client.call('placeSettlement', { vertexKey: vertex });
+      } catch (err) {
+        pushNotification(err.message || 'Cannot place settlement there');
+        return;
+      }
+      try {
+        await client.call('placeRoad', {
+          edgeKey: edge,
+          isSetup: true,
+          lastSettlement: vertex,
+        });
+      } catch (err) {
+        pushNotification(err.message || 'Cannot place road there');
+        return;
+      }
+      setPendingSetup({ vertex: null, edge: null });
+      try { await client.call('advanceSetup'); }
+      catch (err) { pushNotification(err.message || 'Could not advance'); }
+      return;
+    }
+    if (phase === 'playing' && pendingBuild) {
+      const { kind, key } = pendingBuild;
+      try {
+        if (kind === 'settlement') await client.call('placeSettlement', { vertexKey: key });
+        else if (kind === 'city') await client.call('upgradeToCity', { vertexKey: key });
+        else if (kind === 'road') await client.call('placeRoad', { edgeKey: key });
+        setPendingBuild(null);
+      } catch (err) {
+        pushNotification(err.message || 'Cannot build');
+      }
+    }
+  }, [client, phase, pendingSetup, pendingBuild, pushNotification]);
+
+  // Composite object passed to HexBoard so it can draw ghost placements.
+  const pendingForBoard = useMemo(() => {
+    if (phase === 'setup') {
+      return {
+        vertex: pendingSetup.vertex,
+        edge: pendingSetup.edge,
+        vertexKind: 'settlement',
+        ownerIndex: myIndex,
+      };
+    }
+    if (pendingBuild) {
+      if (pendingBuild.kind === 'road') {
+        return { edge: pendingBuild.key, ownerIndex: myIndex };
+      }
+      return { vertex: pendingBuild.key, vertexKind: pendingBuild.kind, ownerIndex: myIndex };
+    }
+    return null;
+  }, [phase, pendingSetup, pendingBuild, myIndex]);
+
+  const hasPending = !!(pendingForBoard && (pendingForBoard.vertex || pendingForBoard.edge));
 
   const onStealPicked = async (playerIdOrNull) => {
     if (!stealChooser) return;
@@ -173,8 +260,11 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   const winner = phase === 'finished' ? players[game?.winner] : null;
 
   return (
-    <main className="relative flex min-h-dvh flex-col bg-surface pb-[calc(88px+env(safe-area-inset-bottom))]">
-      <header className="sticky top-0 z-30 bg-surface/80 backdrop-blur-xl supports-[not(backdrop-filter:blur(0))]:bg-surface/96 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-3">
+    <main className="relative min-h-dvh bg-surface pb-[calc(88px+env(safe-area-inset-bottom))]" style={{ touchAction: 'pan-y' }}>
+      {/* Sticky header — backdrop-blur moved to an inner span (iOS Safari
+          routing bug on blur-filter containers could swallow touches). */}
+      <header className="sticky top-0 z-30 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-3 bg-surface/96">
+        <span aria-hidden="true" className="absolute inset-0 -z-10 backdrop-blur-xl supports-[not(backdrop-filter:blur(0))]:hidden" />
         <div className="flex items-center justify-between gap-3">
           <button type="button" aria-label="Leave" onClick={onLeave} className="rounded-full p-2 text-primary hover:bg-surface-container">
             <Icons.ArrowLeft size={20} />
@@ -202,6 +292,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
             <HexBoard
               game={game}
               playerId={playerId}
+              pending={pendingForBoard}
               onVertexClick={isMyTurn && turnPhase !== 'robber' && turnPhase !== 'discard' ? onVertexClick : undefined}
               onEdgeClick={isMyTurn && turnPhase !== 'robber' && turnPhase !== 'discard' ? onEdgeClick : undefined}
               onHexClick={isRobberTurn ? onHexClick : undefined}
@@ -217,19 +308,27 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
           phase={phase}
           turnPhase={turnPhase}
           isMyTurn={isMyTurn}
-          pendingSetupSettlement={pendingSetupSettlement}
+          pendingSetup={pendingSetup}
+          pendingBuild={pendingBuild}
+          hasPending={hasPending}
           currentName={players[currentIndex]?.name}
           lastRoll={lastRoll}
           hasRolled={!!game?.hasRolledThisTurn}
           onRoll={rollDice}
           onEndTurn={endTurn}
+          onConfirm={confirmPlacement}
+          onReset={resetPending}
         />
       </section>
 
       {me ? (
         <ResourceHUD>
           {RESOURCE_ORDER.map((r) => (
-            <Chip key={r} tint={RESOURCE_TINTS[r]} count={me.resources?.[r] ?? 0}>{RESOURCE_LABELS[r]}</Chip>
+            <HudResourceChip
+              key={r}
+              resource={r}
+              count={me.resources?.[r] ?? 0}
+            />
           ))}
         </ResourceHUD>
       ) : null}
@@ -316,6 +415,13 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
         />
       ) : null}
 
+      {pendingSteal ? (
+        <StealResultToast
+          pending={pendingSteal}
+          onDismiss={clearPendingSteal}
+        />
+      ) : null}
+
       {myDiscardInfo && me ? (
         <DiscardDialog
           required={myDiscardInfo.cardsToDiscard}
@@ -332,7 +438,21 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
 
 // ---------- Turn card ---------------------------------------------------
 
-function TurnCard({ phase, turnPhase, isMyTurn, pendingSetupSettlement, currentName, lastRoll, hasRolled, onRoll, onEndTurn }) {
+function TurnCard({
+  phase,
+  turnPhase,
+  isMyTurn,
+  pendingSetup,
+  pendingBuild,
+  hasPending,
+  currentName,
+  lastRoll,
+  hasRolled,
+  onRoll,
+  onEndTurn,
+  onConfirm,
+  onReset,
+}) {
   const phaseLabel =
     phase === 'setup' ? 'Preparing for Settlement' :
     phase === 'finished' ? 'Expedition Ended' :
@@ -340,9 +460,18 @@ function TurnCard({ phase, turnPhase, isMyTurn, pendingSetupSettlement, currentN
 
   let status;
   if (!isMyTurn) status = `${currentName ?? '…'} is planning`;
-  else if (phase === 'setup') status = pendingSetupSettlement ? 'Tap an adjacent edge to place your road' : 'Tap a vertex to place your settlement';
+  else if (phase === 'setup') {
+    if (pendingSetup?.vertex && pendingSetup?.edge) status = 'Ready — tap Confirm to place both';
+    else if (pendingSetup?.vertex) status = 'Tap an adjacent edge for your road';
+    else if (pendingSetup?.edge) status = 'Tap a vertex for your settlement';
+    else status = 'Tap a vertex and an edge — then Confirm';
+  }
   else if (turnPhase === 'discard') status = 'Rolled a 7 — everyone with >7 cards must discard';
   else if (turnPhase === 'robber') status = 'Move the robber: tap a hex';
+  else if (pendingBuild) {
+    const label = pendingBuild.kind === 'road' ? 'road' : pendingBuild.kind === 'city' ? 'city' : 'settlement';
+    status = `Tap Confirm to build the ${label}`;
+  }
   else status = 'Your move';
 
   return (
@@ -355,11 +484,26 @@ function TurnCard({ phase, turnPhase, isMyTurn, pendingSetupSettlement, currentN
         </p>
       ) : null}
 
-      {isMyTurn && phase === 'playing' && turnPhase === 'roll' ? (
+      {/* Confirm + Reset appear whenever there's a pending placement (#7). */}
+      {isMyTurn && hasPending ? (
+        <div className="flex w-full gap-2">
+          <Button
+            className="flex-1"
+            icon={<Icons.Check size={16} />}
+            onClick={onConfirm}
+            disabled={phase === 'setup' && !(pendingSetup?.vertex && pendingSetup?.edge)}
+          >
+            Confirm
+          </Button>
+          <Button className="flex-1" variant="secondary" onClick={onReset}>Reset</Button>
+        </div>
+      ) : null}
+
+      {isMyTurn && phase === 'playing' && turnPhase === 'roll' && !hasPending ? (
         <Button className="w-full" icon={<Icons.Dice size={18} />} onClick={onRoll}>Roll the Dice</Button>
       ) : null}
 
-      {isMyTurn && phase === 'playing' && turnPhase === 'main' ? (
+      {isMyTurn && phase === 'playing' && turnPhase === 'main' && !hasPending ? (
         <Button className="w-full" variant="secondary" icon={<Icons.Check size={16} />} onClick={onEndTurn} disabled={!hasRolled}>
           End Turn
         </Button>
@@ -369,6 +513,30 @@ function TurnCard({ phase, turnPhase, isMyTurn, pendingSetupSettlement, currentN
 }
 
 // ---------- Player pip + misc -------------------------------------------
+
+// Compact HUD chip tuned to fit 5-across on a 360px viewport (#9 #10 concerns).
+// Icon takes a resource tint, short 3-letter label, and bold count.
+const HUD_TINTS = {
+  brick: 'text-secondary',
+  lumber: 'text-primary',
+  wool: 'text-primary',
+  grain: 'text-tertiary',
+  ore: 'text-on-surface-variant',
+};
+
+function HudResourceChip({ resource, count }) {
+  const Icon = ResourceIcons[resource];
+  const tint = HUD_TINTS[resource] ?? 'text-on-surface';
+  return (
+    <span className="flex flex-1 min-w-0 items-center justify-center gap-1 rounded-full bg-surface-high px-1.5 py-1">
+      <span className={`flex shrink-0 ${tint}`} aria-hidden="true">
+        {Icon ? <Icon size={14} /> : null}
+      </span>
+      <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface/70">{RESOURCE_SHORT[resource]}</span>
+      <span className="text-sm font-extrabold text-on-surface">{count}</span>
+    </span>
+  );
+}
 
 function PlayerPip({ player, faction, isTurn, isYou }) {
   const factionColor = {
@@ -477,94 +645,142 @@ function TradePanel({ me, game, client, isMyTurn, turnPhase, phase, myIndex, onC
     }
   };
 
+  // Hard-split tabs so a Bank bundle can't accidentally broadcast to players (#1).
+  const [mode, setMode] = useState('bank'); // 'bank' | 'players'
+
+  // Reset the currently-active pane's in-progress state when the user flips tabs.
+  const switchMode = (next) => {
+    if (next === mode) return;
+    if (next === 'bank') {
+      setGiveResource(null);
+      setGetResource(null);
+    }
+    setMode(next);
+  };
+
+  const disabledCopy = !tradable
+    ? (phase !== 'playing'
+        ? 'Trading opens after the setup phase.'
+        : !isMyTurn
+        ? 'You can only trade on your own turn.'
+        : turnPhase === 'roll'
+        ? 'Roll the dice first, then trade.'
+        : 'Not a trading moment.')
+    : null;
+
   return createPortal(
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center bg-on-surface/40 backdrop-blur-sm pb-[calc(96px+env(safe-area-inset-bottom))]"
+      className="fixed inset-0 z-40 flex items-end justify-center bg-on-surface/40 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div className="w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-        <Card tone="surface" className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div>
+      <div
+        className="w-full max-w-md mx-2 mb-[calc(96px+env(safe-area-inset-bottom))]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Card
+          tone="surface"
+          className="flex flex-col gap-3 max-h-[min(calc(100dvh-88px-env(safe-area-inset-bottom)-96px),720px)] overflow-y-auto"
+          padded={false}
+        >
+          {/* Sticky header inside the scrollable sheet */}
+          <div className="sticky top-0 z-10 -mx-0 px-5 pt-5 pb-3 bg-surface rounded-t-xl">
+            <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-on-surface">Marketplace</h2>
-              <p className="text-xs text-on-surface-variant">Bank trade — ratios reflect your ports.</p>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={onClose}
+                className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container"
+              >
+                <Icons.X size={18} />
+              </button>
             </div>
-            <button
-              type="button"
-              aria-label="Close"
-              onClick={onClose}
-              className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container"
-            >
-              <Icons.X size={18} />
-            </button>
+            {/* Segmented tabs */}
+            <div className="mt-3 inline-flex items-center rounded-full bg-surface-high p-0.5" role="tablist">
+              <TabButton active={mode === 'bank'} onClick={() => switchMode('bank')} label="Bank" />
+              <TabButton active={mode === 'players'} onClick={() => switchMode('players')} label="With Players" />
+            </div>
           </div>
 
-          {!tradable ? (
-            <p className="text-sm text-on-surface-variant">
-              {phase !== 'playing'
-                ? 'Trading opens after the setup phase.'
-                : !isMyTurn
-                ? 'You can only trade on your own turn.'
-                : turnPhase === 'roll'
-                ? 'Roll the dice first, then trade.'
-                : 'Not a trading moment.'}
-            </p>
-          ) : null}
+          <div className="px-5 pb-5 flex flex-col gap-4">
+            {disabledCopy ? (
+              <p className="text-sm text-on-surface-variant">{disabledCopy}</p>
+            ) : null}
 
-          <TradeRow
-            label="I give"
-            selected={giveResource}
-            onSelect={setGiveResource}
-            resources={resources}
-            ratios={ratios}
-            disabled={!tradable}
-          />
-
-          <TradeRow
-            label="I want"
-            selected={getResource}
-            onSelect={setGetResource}
-            disabled={!tradable}
-          />
-
-          {giveResource && getResource && giveResource !== getResource ? (
-            <div className="rounded-md bg-surface-low p-3 text-sm text-on-surface">
-              Trade <span className="font-bold text-primary">{giveRatio} {RESOURCE_LABELS[giveResource]}</span>{' '}
-              for <span className="font-bold text-primary">1 {RESOURCE_LABELS[getResource]}</span>
-              {(resources[giveResource] ?? 0) < giveRatio ? (
-                <span className="ml-2 text-secondary font-semibold">— need {giveRatio - (resources[giveResource] ?? 0)} more</span>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="flex justify-end gap-2">
-            <Button variant="tertiary" onClick={onClose}>Cancel</Button>
-            <Button onClick={submit} disabled={!canSubmit || busy}>
-              {busy ? 'Trading…' : 'Complete Trade'}
-            </Button>
-          </div>
-
-          {/* Player-to-player section */}
-          <div className="mt-4 border-t border-outline-variant/25 pt-4">
-            <h3 className="text-base font-bold text-on-surface">Offer to the Expedition</h3>
-            <p className="text-xs text-on-surface-variant mt-0.5">
-              Propose a swap with any other player. They accept or decline.
-            </p>
-
-            <PlayerTradeSection
-              me={me}
-              game={game}
-              client={client}
-              myIndex={myIndex}
-              tradable={tradable}
-              onClose={onClose}
-              pushNotification={pushNotification}
-            />
+            {mode === 'bank' ? (
+              <>
+                <p className="text-xs text-on-surface-variant">
+                  Trade with the bank. Ratio reflects the ports you sit on — 2:1 on a matching port, 3:1 on a generic, 4:1 otherwise.
+                </p>
+                <TradeRow
+                  label="I give"
+                  selected={giveResource}
+                  onSelect={setGiveResource}
+                  resources={resources}
+                  ratios={ratios}
+                  disabled={!tradable}
+                />
+                <TradeRow
+                  label="I want"
+                  selected={getResource}
+                  onSelect={setGetResource}
+                  disabled={!tradable}
+                />
+                {giveResource && getResource && giveResource !== getResource ? (
+                  <div className="rounded-md bg-surface-low p-3 text-sm text-on-surface">
+                    Trade <span className="font-bold text-primary">{giveRatio} {RESOURCE_LABELS[giveResource]}</span>{' '}
+                    for <span className="font-bold text-primary">1 {RESOURCE_LABELS[getResource]}</span>
+                    {(resources[giveResource] ?? 0) < giveRatio ? (
+                      <span className="ml-2 text-secondary font-semibold">— need {giveRatio - (resources[giveResource] ?? 0)} more</span>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="flex justify-end gap-2">
+                  <Button variant="tertiary" onClick={onClose}>Cancel</Button>
+                  <Button onClick={submit} disabled={!canSubmit || busy}>
+                    {busy ? 'Trading…' : 'Complete Trade'}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-on-surface-variant">
+                  Offer a bundle to the expedition. Any player can accept or decline.
+                </p>
+                <PlayerTradeSection
+                  me={me}
+                  game={game}
+                  client={client}
+                  myIndex={myIndex}
+                  tradable={tradable}
+                  onClose={onClose}
+                  pushNotification={pushNotification}
+                />
+              </>
+            )}
           </div>
         </Card>
       </div>
     </div>,
     document.body
+  );
+}
+
+// Small pill-tab component for the Marketplace's Bank / Players switch.
+function TabButton({ active, onClick, label }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={[
+        'rounded-full px-4 py-1.5 text-xs font-extrabold uppercase tracking-wider transition-colors',
+        active ? 'bg-primary text-on-primary shadow-ambient' : 'text-on-surface-variant hover:text-on-surface',
+      ].join(' ')}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -664,14 +880,19 @@ function BundleBuilder({ label, bundle, resources, setBundle, limit = false, dis
       <p className="text-xs font-bold uppercase tracking-wider text-on-surface/60 mb-2">{label}</p>
       <div className="flex flex-col gap-1.5">
         {RESOURCE_ORDER.map((r) => {
+          const Icon = ResourceIcons[r];
+          const tint = HUD_TINTS[r] ?? 'text-on-surface';
           const count = bundle[r] ?? 0;
           const have = resources?.[r];
           const max = limit && resources ? resources[r] : undefined;
           return (
             <div key={r} className="flex items-center justify-between rounded-md bg-surface p-2 px-3">
-              <span className="flex flex-col">
-                <span className="text-sm font-semibold text-on-surface">{RESOURCE_LABELS[r]}</span>
-                {have !== undefined ? <span className="text-[10px] text-on-surface-variant">have {have}</span> : null}
+              <span className="flex items-center gap-2">
+                <span className={`shrink-0 ${tint}`} aria-hidden="true">{Icon ? <Icon size={18} /> : null}</span>
+                <span className="flex flex-col">
+                  <span className="text-sm font-semibold text-on-surface">{RESOURCE_LABELS[r]}</span>
+                  {have !== undefined ? <span className="text-[10px] text-on-surface-variant">have {have}</span> : null}
+                </span>
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -753,6 +974,7 @@ function TradeRow({ label, selected, onSelect, resources, ratios, disabled }) {
       <p className="text-xs font-bold uppercase tracking-wider text-on-surface/60 mb-2">{label}</p>
       <div className="grid grid-cols-5 gap-2">
         {RESOURCE_ORDER.map((r) => {
+          const Icon = ResourceIcons[r];
           const active = selected === r;
           const count = resources?.[r];
           const ratio = ratios?.[r];
@@ -768,6 +990,9 @@ function TradeRow({ label, selected, onSelect, resources, ratios, disabled }) {
                 disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-surface-highest',
               ].join(' ')}
             >
+              <span aria-hidden="true" className={active ? 'text-on-primary' : HUD_TINTS[r] ?? ''}>
+                {Icon ? <Icon size={18} /> : null}
+              </span>
               <span className="uppercase tracking-wider">{RESOURCE_LABELS[r]}</span>
               {count !== undefined ? <span className="text-[10px] opacity-80">have {count}</span> : null}
               {ratio !== undefined ? <span className="text-[10px] opacity-80">{ratio}:1</span> : null}
@@ -846,7 +1071,7 @@ function DevCardPanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, p
             <div>
               <h2 className="text-lg font-bold text-on-surface">Development Cards</h2>
               <p className="text-xs text-on-surface-variant">
-                Costs <strong>1 ore · 1 wheat · 1 sheep</strong> per card. {deckLeft} left in the deck.
+                Costs <strong>1 Ore · 1 Hay · 1 Sheep</strong> per card. {deckLeft} left in the deck.
               </p>
             </div>
             <button
@@ -878,9 +1103,9 @@ function DevCardPanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, p
 
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface/60 mb-2">
-              In Your Hand ({owned.length})
+              In Your Hand ({owned.length + boughtCount})
             </h3>
-            {owned.length === 0 ? (
+            {owned.length === 0 && boughtCount === 0 ? (
               <p className="text-sm text-on-surface-variant">No cards yet. Buy one above when you can afford it.</p>
             ) : (
               <div className="flex flex-col gap-2">
@@ -906,14 +1131,28 @@ function DevCardPanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, p
                     </div>
                   );
                 })}
+
+                {/* Bought-this-turn cards — show the type so users know what's
+                    coming, with a lock badge since they can't be played yet (#3). */}
+                {Object.entries(countCards(bought)).map(([cardType, count]) => {
+                  const meta = DEV_CARD_LABELS[cardType] ?? { title: cardType, body: '' };
+                  return (
+                    <div key={`new-${cardType}`} className="rounded-md bg-surface-low p-3 flex items-start justify-between gap-3 opacity-70">
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-on-surface flex items-center gap-2">
+                          {meta.title}
+                          <span className="text-on-surface-variant font-normal">× {count}</span>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-surface-high px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                            Locked · next turn
+                          </span>
+                        </p>
+                        <p className="text-xs text-on-surface-variant mt-0.5">{meta.body}</p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
-
-            {boughtCount > 0 ? (
-              <p className="mt-3 text-xs text-on-surface-variant">
-                {boughtCount} bought this turn — playable next turn.
-              </p>
-            ) : null}
           </div>
         </Card>
       </div>
@@ -953,17 +1192,21 @@ function YearOfPlentyPicker({ remaining, client, pushNotification }) {
           <h2 className="text-lg font-bold text-on-surface mt-1">Take {remaining} more from the bank</h2>
         </div>
         <div className="grid grid-cols-5 gap-2">
-          {RESOURCE_ORDER.map((r) => (
-            <button
-              key={r}
-              type="button"
-              disabled={busy}
-              onClick={() => pick(r)}
-              className="flex flex-col items-center gap-0.5 rounded-md bg-surface-high px-2 py-3 text-xs font-bold text-on-surface hover:bg-surface-highest disabled:opacity-40"
-            >
-              {RESOURCE_LABELS[r]}
-            </button>
-          ))}
+          {RESOURCE_ORDER.map((r) => {
+            const Icon = ResourceIcons[r];
+            return (
+              <button
+                key={r}
+                type="button"
+                disabled={busy}
+                onClick={() => pick(r)}
+                className="flex flex-col items-center gap-1 rounded-md bg-surface-high px-2 py-3 text-xs font-bold text-on-surface hover:bg-surface-highest disabled:opacity-40"
+              >
+                <span aria-hidden="true" className={HUD_TINTS[r] ?? ''}>{Icon ? <Icon size={18} /> : null}</span>
+                {RESOURCE_LABELS[r]}
+              </button>
+            );
+          })}
         </div>
       </Card>
     </div>,
@@ -982,16 +1225,20 @@ function ResourcePickerModal({ title, body, onPick, onCancel }) {
           <p className="text-sm text-on-surface-variant mt-1">{body}</p>
         </div>
         <div className="grid grid-cols-5 gap-2">
-          {RESOURCE_ORDER.map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => onPick(r)}
-              className="flex flex-col items-center gap-0.5 rounded-md bg-surface-high px-2 py-3 text-xs font-bold text-on-surface hover:bg-surface-highest"
-            >
-              {RESOURCE_LABELS[r]}
-            </button>
-          ))}
+          {RESOURCE_ORDER.map((r) => {
+            const Icon = ResourceIcons[r];
+            return (
+              <button
+                key={r}
+                type="button"
+                onClick={() => onPick(r)}
+                className="flex flex-col items-center gap-1 rounded-md bg-surface-high px-2 py-3 text-xs font-bold text-on-surface hover:bg-surface-highest"
+              >
+                <span aria-hidden="true" className={HUD_TINTS[r] ?? ''}>{Icon ? <Icon size={18} /> : null}</span>
+                {RESOURCE_LABELS[r]}
+              </button>
+            );
+          })}
         </div>
         <Button variant="tertiary" onClick={onCancel}>Cancel</Button>
       </Card>
@@ -1032,6 +1279,34 @@ function TabPanel({ tab, onClose }) {
 }
 
 // ---------- Game-over overlay ------------------------------------------
+
+// ---------- Steal result toast ----------------------------------------
+// Shows exactly once per robber-move: self-dismisses after 4s, or on tap.
+
+function StealResultToast({ pending, onDismiss }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(t);
+  }, [pending, onDismiss]);
+
+  const resourceLabel = RESOURCE_LABELS[pending.resource] ?? pending.resource;
+  const message = pending.variant === 'stole'
+    ? `You stole 1 ${resourceLabel} from ${pending.otherPlayer}`
+    : `${pending.otherPlayer} stole 1 ${resourceLabel} from you`;
+  const tone = pending.variant === 'stole' ? 'bg-primary text-on-primary' : 'bg-secondary text-on-secondary';
+
+  return createPortal(
+    <div
+      className="fixed inset-x-0 top-[calc(env(safe-area-inset-top,0px)+60px)] z-[65] flex justify-center px-4 pointer-events-none"
+      onClick={onDismiss}
+    >
+      <div className={`pointer-events-auto rounded-full px-4 py-2 text-sm font-extrabold shadow-ambient ${tone}`}>
+        {message}
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 function GameOverOverlay({ winner, players, myPlayerId, onLeave }) {
   const ranked = useMemo(
@@ -1109,29 +1384,35 @@ function DiscardDialog({ required, resources, onSubmit }) {
           </p>
         </div>
         <div className="flex flex-col gap-2">
-          {RESOURCE_ORDER.map((r) => (
-            <div key={r} className="flex items-center justify-between rounded-md bg-surface p-3">
-              <div className="flex flex-col">
-                <span className="text-sm font-bold text-on-surface">{RESOURCE_LABELS[r]}</span>
-                <span className="text-xs text-on-surface-variant">Have: {resources?.[r] ?? 0}</span>
+          {RESOURCE_ORDER.map((r) => {
+            const Icon = ResourceIcons[r];
+            return (
+              <div key={r} className="flex items-center justify-between rounded-md bg-surface p-3">
+                <div className="flex items-center gap-2">
+                  <span aria-hidden="true" className={HUD_TINTS[r] ?? ''}>{Icon ? <Icon size={20} /> : null}</span>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-on-surface">{RESOURCE_LABELS[r]}</span>
+                    <span className="text-xs text-on-surface-variant">Have: {resources?.[r] ?? 0}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    aria-label={`Less ${RESOURCE_LABELS[r]}`}
+                    onClick={() => adjust(r, -1)}
+                    className="h-9 w-9 rounded-full bg-surface-high text-on-surface font-bold"
+                  >−</button>
+                  <span className="min-w-[2ch] text-center text-base font-extrabold text-on-surface">{picks[r]}</span>
+                  <button
+                    type="button"
+                    aria-label={`More ${RESOURCE_LABELS[r]}`}
+                    onClick={() => adjust(r, +1)}
+                    className="h-9 w-9 rounded-full bg-surface-high text-on-surface font-bold"
+                  >+</button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  aria-label={`Less ${RESOURCE_LABELS[r]}`}
-                  onClick={() => adjust(r, -1)}
-                  className="h-9 w-9 rounded-full bg-surface-high text-on-surface font-bold"
-                >−</button>
-                <span className="min-w-[2ch] text-center text-base font-extrabold text-on-surface">{picks[r]}</span>
-                <button
-                  type="button"
-                  aria-label={`More ${RESOURCE_LABELS[r]}`}
-                  onClick={() => adjust(r, +1)}
-                  className="h-9 w-9 rounded-full bg-surface-high text-on-surface font-bold"
-                >+</button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-on-surface-variant">
