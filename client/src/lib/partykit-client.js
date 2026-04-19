@@ -15,9 +15,28 @@ import PartySocket from 'partysocket';
  *
  * `partysocket` auto-reconnects with backoff — we don't implement our own.
  */
-const DEFAULT_HOST =
-  import.meta.env.VITE_PARTY_HOST ??
-  (typeof window !== 'undefined' ? `${window.location.hostname}:1999` : 'localhost:1999');
+/**
+ * Resolve the PartyKit host for the current environment.
+ *
+ *  - Explicit `VITE_PARTY_HOST` always wins (for staging overrides).
+ *  - Localhost / *.local / IPv4 → port 1999 for `partykit dev`.
+ *  - Anything else → the bare hostname so partysocket uses wss://:443 (the
+ *    only port Cloudflare serves PartyKit on in production).
+ *
+ * Earlier this always appended `:1999`, which broke prod: Cloudflare has no
+ * listener on port 1999 so the WS handshake never completed.
+ */
+const DEFAULT_HOST = (() => {
+  if (import.meta.env.VITE_PARTY_HOST) return import.meta.env.VITE_PARTY_HOST;
+  if (typeof window === 'undefined') return 'localhost:1999';
+  const { hostname } = window.location;
+  const isLocal =
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.endsWith('.local') ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  return isLocal ? `${hostname}:1999` : hostname;
+})();
 
 const CALL_TIMEOUT_MS = 8000;
 
