@@ -1,301 +1,302 @@
-/**
- * ============================================================================
- * CATAN CLIENT APPLICATION
- * ============================================================================
- * 
- * Main React application for the Catan game client.
- * Handles:
- * - Socket.io connection management
- * - Game state management
- * - Session persistence (localStorage)
- * - Global notifications
- * - Keep-alive pings (for Render free tier)
- */
-
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { io } from './lib/socket-shim'; // TEMP: replaced by partysocket in Phase 1.11
-import Lobby from './components/Lobby';
-import GameBoard from './components/GameBoard';
+import { Landing } from './pages/Landing';
+import { Lobby } from './pages/Lobby';
+import { Board } from './pages/Board';
 import PWAInstallHint from './components/PWAInstallHint';
+import { useGameStore } from './stores/gameStore';
+import { useRoom, leaveRoom } from './hooks/useRoom';
+import { useScreenWakeLock } from './hooks/useScreenWakeLock';
+import { generateRoomCode } from './lib/room-code';
+import {
+  getActiveGame,
+  saveActiveGame,
+  getProfile,
+  saveProfile,
+  upsertRecentRoom,
+  clearActiveGame,
+} from './lib/cache';
 import './App.css';
 
-// Server URL from environment variable, falls back to localhost for development
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+const SESSION_KEY = 'clubcatan:session';
 
-// Keep server alive by pinging every 4 minutes (Render free tier spins down after 15 min)
-const KEEP_ALIVE_INTERVAL = 4 * 60 * 1000;
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
 
+function saveSession(session) {
+  if (!session) {
+    localStorage.removeItem(SESSION_KEY);
+    return;
+  }
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch {}
+}
+
+/**
+ * Root of the ClubCatan client.
+ *
+ * Routing is state-driven (not URL-driven — PartyKit's single-room URL already
+ * identifies the game). The three screens:
+ *
+ *   Landing  — no active room. User creates or joins.
+ *   Lobby    — in a room, game.phase === 'waiting'.
+ *   Board    — in a room, game.phase in { 'setup' | 'playing' | 'finished' }.
+ *
+ * Session (roomCode + playerId + name) persists in localStorage so a hard
+ * reload auto-reconnects. The gameStore is rehydrated from IndexedDB
+ * `activeGame` while the socket handshakes, then overwritten by the server's
+ * authoritative view.
+ */
 function App() {
-  // ============================================================================
-  // STATE MANAGEMENT
-  // ============================================================================
-  
-  const [socket, setSocket] = useState(null);           // Socket.io connection
-  const [connected, setConnected] = useState(false);     // Connection status
-  const [gameState, setGameState] = useState(null);      // Current game state from server
-  const [playerId, setPlayerId] = useState(null);        // This player's unique ID
-  const [gameCode, setGameCode] = useState(null);        // Current game room code
-  const [error, setError] = useState(null);              // Error messages for display
-  const [chatMessages, setChatMessages] = useState([]);  // Chat message history
-  const [notifications, setNotifications] = useState([]); // Toast notifications
-  const [serverFull, setServerFull] = useState(false);   // Server capacity flag
+  const [session, setSession] = useState(loadSession);
+  const [defaultName, setDefaultName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
-  // ============================================================================
-  // SOCKET CONNECTION & EVENT HANDLERS
-  // ============================================================================
-  
+  const { client, status } = useRoom(session?.roomCode);
+  const clientRef = useRef(null);
+  useEffect(() => { clientRef.current = client; }, [client]);
+  const game = useGameStore((s) => s.game);
+  const setGame = useGameStore((s) => s.setGame);
+  const notifications = useGameStore((s) => s.notifications);
+  const pushNotification = useGameStore((s) => s.pushNotification);
+
+  // Keep the screen awake while actively in a room.
+  useScreenWakeLock(!!session?.roomCode);
+
+  // First-run: rehydrate profile name (for the landing form) and any cached
+  // snapshot for the last active room (makes reload feel instant).
   useEffect(() => {
-    const newSocket = io(SERVER_URL);
-    
-    newSocket.on('connect', () => {
-      console.log('Connected to server');
-      setConnected(true);
-      setServerFull(false);
-      
-      // Try to reconnect to existing game
-      const savedGame = localStorage.getItem('catanGame');
-      if (savedGame) {
-        const { gameCode, playerId } = JSON.parse(savedGame);
-        newSocket.emit('reconnect', { gameCode, playerId }, (response) => {
-          if (response.success) {
-            setGameCode(gameCode);
-            setPlayerId(playerId);
-            setGameState(response.gameState);
-          } else {
-            localStorage.removeItem('catanGame');
-          }
-        });
+    let cancelled = false;
+    (async () => {
+      const profile = await getProfile();
+      if (cancelled) return;
+      if (profile?.nickname) setDefaultName(profile.nickname);
+      if (session?.roomCode) {
+        const cached = await getActiveGame(session.roomCode);
+        if (!cancelled && cached?.snapshot) setGame(cached.snapshot);
       }
-    });
-    
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from server');
-      setConnected(false);
-    });
-    
-    newSocket.on('serverFull', ({ message }) => {
-      console.log('Server is full:', message);
-      setServerFull(true);
-      setConnected(false);
-    });
-    
-    newSocket.on('gameState', (state) => {
-      setGameState(state);
-    });
-    
-    newSocket.on('playerJoined', ({ playerName }) => {
-      addNotification(`${playerName} joined the game`);
-    });
-    
-    newSocket.on('playerDisconnected', ({ playerName }) => {
-      addNotification(`${playerName} disconnected`);
-    });
-    
-    newSocket.on('playerReconnected', ({ playerName }) => {
-      addNotification(`${playerName} reconnected`);
-    });
-    
-    newSocket.on('gameStarted', () => {
-      addNotification('Game started! Place your first settlement.');
-    });
-    
-    newSocket.on('diceRolled', ({ roll, playerId: rollerId }) => {
-      // Notification handled in GameBoard
-    });
-    
-    newSocket.on('chatMessage', (msg) => {
-      setChatMessages(prev => [...prev, msg]);
-    });
-    
-    newSocket.on('tradeProposed', ({ from, offer, request }) => {
-      // Handled in GameBoard
-    });
-    
-    newSocket.on('tradeAccepted', ({ by }) => {
-      addNotification('Trade completed!');
-    });
-    
-    newSocket.on('tradeCancelled', () => {
-      addNotification('Trade cancelled');
-    });
-    
-    setSocket(newSocket);
-    
-    return () => {
-      newSocket.close();
-    };
+    })();
+    return () => { cancelled = true; };
+    // Only run on mount — we only care about boot-time rehydrate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ============================================================================
-  // KEEP-ALIVE PING (prevents Render free tier from sleeping)
-  // ============================================================================
-  
+  // Once the socket opens, try to reconnect so the server binds our player id
+  // to the new connection. Skips if we don't have a playerId yet (fresh
+  // create/join flow — those use call('createGame')/call('joinGame') instead,
+  // which implicitly bind the connection).
+  //
+  // We also dedupe per (client, playerId) — the effect re-fires whenever
+  // `session` changes, and after a successful create/join the session updates
+  // from {playerId: null} to {playerId: real}, which would otherwise trigger
+  // a needless second reconnect on the same connection.
+  const reconnectKeyRef = useRef(null);
   useEffect(() => {
-    const pingServer = async () => {
+    if (!client || status !== 'open') return;
+    if (!session?.playerId) return;
+    const key = `${client.roomCode}:${session.playerId}`;
+    if (reconnectKeyRef.current === key) return;
+    reconnectKeyRef.current = key;
+
+    let cancelled = false;
+    (async () => {
       try {
-        await fetch(`${SERVER_URL}/ping`);
-        console.log('Keep-alive ping sent');
+        const result = await client.call('reconnect', { playerId: session.playerId });
+        if (cancelled) return;
+        if (result?.gameState) setGame(result.gameState);
       } catch (err) {
-        console.log('Keep-alive ping failed:', err.message);
+        if (cancelled) return;
+        // The most common reason is server recycled the room (DO hibernation
+        // eviction, or dev-server restart). Either way, our session is stale.
+        console.warn('[app] reconnect failed — clearing session', err?.message);
+        await leaveRoom(session.roomCode);
+        saveSession(null);
+        setSession(null);
+        pushNotification('Your expedition ended while you were away.');
       }
-    };
+    })();
+    return () => { cancelled = true; };
+  }, [client, status, session, setGame, pushNotification]);
 
-    // Initial ping
-    pingServer();
+  const handleCreate = useCallback(async ({ playerName, isExtended, enableSpecialBuild }) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const roomCode = generateRoomCode();
+      await saveProfile({ nickname: playerName });
+      // Open the room first — the createGame call needs an active socket.
+      const nextSession = { roomCode, playerId: null, name: playerName };
+      setSession(nextSession);
+      saveSession(nextSession);
+      // Wait for useRoom to bind a PartyKit client and open the socket.
+      await waitFor(() => (clientRef.current?.isOpen ? clientRef.current : null));
+      const c = clientRef.current;
+      const result = await c.call('createGame', { playerName, isExtended, enableSpecialBuild });
+      if (result?.gameState) setGame(result.gameState);
+      const finalSession = { ...nextSession, playerId: result.playerId };
+      setSession(finalSession);
+      saveSession(finalSession);
+      await saveActiveGame(roomCode, result.gameState);
+      await upsertRecentRoom({ code: roomCode, host: playerName });
+    } catch (err) {
+      setError(err?.message || 'Could not create expedition');
+      await leaveRoom();
+      setSession(null);
+      saveSession(null);
+    } finally {
+      setBusy(false);
+    }
+  }, [setGame]);
 
-    // Set up interval
-    const interval = setInterval(pingServer, KEEP_ALIVE_INTERVAL);
+  const handleJoin = useCallback(async ({ roomCode, playerName }) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await saveProfile({ nickname: playerName });
+      const nextSession = { roomCode, playerId: null, name: playerName };
+      setSession(nextSession);
+      saveSession(nextSession);
+      await waitFor(() => (clientRef.current?.isOpen ? clientRef.current : null));
+      const c = clientRef.current;
+      const result = await c.call('joinGame', { playerName });
+      if (result?.gameState) setGame(result.gameState);
+      const finalSession = { ...nextSession, playerId: result.playerId };
+      setSession(finalSession);
+      saveSession(finalSession);
+      await saveActiveGame(roomCode, result.gameState);
+      await upsertRecentRoom({ code: roomCode });
+    } catch (err) {
+      setError(err?.message || 'Could not join expedition');
+      await leaveRoom();
+      setSession(null);
+      saveSession(null);
+    } finally {
+      setBusy(false);
+    }
+  }, [setGame]);
 
-    return () => clearInterval(interval);
-  }, []);
+  const handleLeave = useCallback(async () => {
+    if (session?.roomCode) await clearActiveGame(session.roomCode);
+    await leaveRoom(session?.roomCode);
+    reconnectKeyRef.current = null;
+    setSession(null);
+    saveSession(null);
+    useGameStore.getState().reset();
+  }, [session]);
 
-  // ============================================================================
-  // NOTIFICATION HELPERS
-  // ============================================================================
-  
-  /** Add a toast notification that auto-dismisses after 4 seconds */
-  const addNotification = useCallback((message) => {
-    const id = Date.now();
-    setNotifications(prev => [...prev, { id, message }]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 4000);
-  }, []);
+  const handleCopy = useCallback(async () => {
+    if (!session?.roomCode) return;
+    const url = `${window.location.origin}?room=${session.roomCode}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      pushNotification('Link copied.');
+    } catch {
+      pushNotification(`Code: ${session.roomCode}`);
+    }
+  }, [session, pushNotification]);
 
-  // ============================================================================
-  // GAME ACTIONS
-  // ============================================================================
-  
-  /** Create a new game room as the host */
-  const handleCreateGame = useCallback((playerName, isExtended = false, enableSpecialBuild = true) => {
-    if (!socket) return;
-    
-    socket.emit('createGame', { playerName, isExtended, enableSpecialBuild }, (response) => {
-      if (response.success) {
-        setGameCode(response.gameCode);
-        setPlayerId(response.playerId);
-        setGameState(response.gameState);
-        localStorage.setItem('catanGame', JSON.stringify({
-          gameCode: response.gameCode,
-          playerId: response.playerId
-        }));
-      } else {
-        setError(response.error);
-      }
-    });
-  }, [socket]);
+  const handleStart = useCallback(async () => {
+    if (!client) return;
+    setBusy(true);
+    try {
+      await client.call('startGame');
+    } catch (err) {
+      pushNotification(err?.message || 'Could not start');
+    } finally {
+      setBusy(false);
+    }
+  }, [client, pushNotification]);
 
-  /** Join an existing game room using a code */
-  const handleJoinGame = useCallback((code, playerName) => {
-    if (!socket) return;
-    
-    socket.emit('joinGame', { gameCode: code, playerName }, (response) => {
-      if (response.success) {
-        setGameCode(response.gameCode);
-        setPlayerId(response.playerId);
-        setGameState(response.gameState);
-        localStorage.setItem('catanGame', JSON.stringify({
-          gameCode: response.gameCode,
-          playerId: response.playerId
-        }));
-      } else {
-        setError(response.error);
-      }
-    });
-  }, [socket]);
+  // Pick up ?room=CODE from the URL on first load (copied share link).
+  useEffect(() => {
+    if (session?.roomCode) return;
+    const url = new URL(window.location.href);
+    const roomParam = url.searchParams.get('room');
+    if (!roomParam) return;
+    // Don't auto-join — surface it by pre-filling the landing form.
+    // Easiest path: leave it as a URL param; the join form's button flow handles it.
+  }, [session]);
 
-  /** Leave the current game and return to lobby */
-  const handleLeaveGame = useCallback(() => {
-    setGameState(null);
-    setGameCode(null);
-    setPlayerId(null);
-    setChatMessages([]);
-    localStorage.removeItem('catanGame');
-  }, []);
-
-  // ============================================================================
-  // RENDER
-  // ============================================================================
-  
-  // Server at capacity - show retry screen
-  if (serverFull) {
-    return (
-      <div className="loading-screen server-full">
-        <div className="loading-content">
-          <h1>CATAN</h1>
-          <div className="server-full-icon">🏰</div>
-          <h2>Server at Capacity</h2>
-          <p>Too many players are currently online!</p>
-          <p className="server-full-hint">Please try again in a few minutes.</p>
-          <button 
-            className="retry-btn"
-            onClick={() => window.location.reload()}
-          >
-            🔄 Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Connecting to server - show loading screen
-  if (!connected) {
-    return (
-      <div className="loading-screen">
-        <div className="loading-content">
-          <h1>CATAN</h1>
-          <p>Connecting to server...</p>
-          <div className="loading-spinner"></div>
-        </div>
-      </div>
-    );
-  }
-
-  // No active game - show lobby for creating/joining games
-  if (!gameState) {
+  // ---- Render ----
+  if (!session?.roomCode) {
     return (
       <>
-        <Lobby
-          onCreateGame={handleCreateGame}
-          onJoinGame={handleJoinGame}
+        <Landing
+          defaultName={defaultName}
+          busy={busy}
           error={error}
-          setError={setError}
+          onCreate={handleCreate}
+          onJoin={handleJoin}
         />
         {createPortal(<PWAInstallHint />, document.body)}
+        <NotificationsOverlay items={notifications} />
       </>
     );
   }
 
-  // Active game - render the game board
+  const phase = game?.phase;
+  const inLobby = !phase || phase === 'waiting';
+
   return (
     <>
-      <div className="app">
-        <GameBoard
-          socket={socket}
-          gameState={gameState}
-          playerId={playerId}
-          gameCode={gameCode}
-          chatMessages={chatMessages}
-          onLeaveGame={handleLeaveGame}
-          addNotification={addNotification}
+      {inLobby ? (
+        <Lobby
+          roomCode={session.roomCode}
+          playerId={session.playerId}
+          busy={busy}
+          onStart={handleStart}
+          onLeave={handleLeave}
+          onCopy={handleCopy}
         />
-      </div>
-
-      {/* Toast notifications - rendered via Portal to document.body for proper z-index */}
-      {createPortal(
-        <div className="notifications">
-          {notifications.map(n => (
-            <div key={n.id} className="notification fade-in">
-              {n.message}
-            </div>
-          ))}
-        </div>,
-        document.body
+      ) : (
+        <Board
+          roomCode={session.roomCode}
+          playerId={session.playerId}
+          client={client}
+          onLeave={handleLeave}
+        />
       )}
       {createPortal(<PWAInstallHint />, document.body)}
+      <NotificationsOverlay items={notifications} />
     </>
   );
+}
+
+function NotificationsOverlay({ items }) {
+  if (!items?.length) return null;
+  return createPortal(
+    <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top,0px)+12px)] z-[60] flex flex-col items-center gap-2 px-4 pointer-events-none">
+      {items.map((n) => (
+        <div
+          key={n.id}
+          className="pointer-events-auto rounded-full bg-on-surface/90 px-4 py-2 text-sm font-semibold text-surface shadow-ambient backdrop-blur-sm"
+        >
+          {n.message}
+        </div>
+      ))}
+    </div>,
+    document.body
+  );
+}
+
+/** Tiny polling helper — used to wait for the socket handshake right after we
+ *  bind a roomCode to the session. Resolves with the value the predicate returns
+ *  or rejects after `timeoutMs`. */
+function waitFor(predicate, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      const v = predicate();
+      if (v) return resolve(v);
+      if (Date.now() - start > timeoutMs) return reject(new Error('Timed out'));
+      setTimeout(tick, intervalMs);
+    };
+    tick();
+  });
 }
 
 export default App;
