@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGameStore } from '../stores/gameStore';
-import { BottomNav, Button, Card, Chip, ResourceHUD } from '../components/ui';
+import { BottomNav, Button, Card, Chip, FactionStripe, ResourceHUD } from '../components/ui';
 import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
 
@@ -368,9 +368,15 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
           pushNotification={pushNotification}
         />
       ) : null}
-      {activeTab === 'status'
-        ? <TabPanel tab={activeTab} onClose={() => setActiveTab('board')} />
-        : null}
+      {activeTab === 'status' ? (
+        <StatusPanel
+          game={game}
+          me={me}
+          playerId={playerId}
+          currentIndex={currentIndex}
+          onClose={() => setActiveTab('board')}
+        />
+      ) : null}
 
       {isMyTurn && (game?.yearOfPlentyPicks ?? 0) > 0 ? (
         <YearOfPlentyPicker
@@ -1247,12 +1253,187 @@ function ResourcePickerModal({ title, body, onPick, onCancel }) {
   );
 }
 
+// ---------- Status panel (live scoreboard) -----------------------------
+//
+// Ranks every player by public victory points and surfaces the pieces they
+// have left + the longest-road / largest-army badges. Sits on top of the
+// live gameState, so scores update as settlements, cities, roads, knights,
+// and dev-card VPs land — no polling, no refresh.
+
+function StatusPanel({ game, me, playerId, currentIndex, onClose }) {
+  const players = game?.players ?? [];
+  const winner = game?.winner != null ? players[game.winner] : null;
+  const victoryTarget = game?.victoryPointsToWin ?? 10;
+
+  // Public VP is authoritative during the game. Hidden VP dev cards only
+  // flip public once the game ends — getPlayerView masks them for others.
+  const ranked = useMemo(
+    () => players
+      .map((p, seat) => ({ ...p, seat }))
+      .sort((a, b) => (b.victoryPoints ?? 0) - (a.victoryPoints ?? 0)),
+    [players]
+  );
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-on-surface/40 backdrop-blur-sm pb-[calc(96px+env(safe-area-inset-bottom))]"
+      onClick={onClose}
+    >
+      <div className="w-full max-w-md mx-2" onClick={(e) => e.stopPropagation()}>
+        <Card
+          tone="surface"
+          padded={false}
+          className="flex flex-col max-h-[min(calc(100dvh-88px-env(safe-area-inset-bottom)-96px),720px)] overflow-y-auto"
+        >
+          <div className="sticky top-0 z-10 px-5 pt-5 pb-3 bg-surface">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-on-surface">Expedition Status</h2>
+                <p className="text-xs text-on-surface-variant mt-0.5">
+                  {winner
+                    ? `${winner.name} won the expedition.`
+                    : `First to ${victoryTarget} VP wins.`}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={onClose}
+                className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container"
+              >
+                <Icons.X size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className="px-5 pb-5 flex flex-col gap-2">
+            {ranked.map((p, rank) => (
+              <PlayerScoreRow
+                key={p.id}
+                player={p}
+                rank={rank}
+                isMe={p.id === playerId}
+                isCurrent={p.seat === currentIndex}
+                victoryTarget={victoryTarget}
+              />
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
+  const vp = player.victoryPoints ?? 0;
+  const faction = FACTIONS[player.seat ?? 0] ?? 'red';
+  const factionClass = {
+    red: 'bg-faction-red',
+    blue: 'bg-faction-blue',
+    gold: 'bg-faction-gold',
+    green: 'bg-faction-green',
+  }[faction] ?? 'bg-outline';
+
+  // Resource / dev-card counts differ in shape between self (object/array)
+  // and opponents (number). Normalize to a number for display.
+  const resourceCount = typeof player.resources === 'number'
+    ? player.resources
+    : Object.values(player.resources ?? {}).reduce((a, b) => a + b, 0);
+  const devCardCount = Array.isArray(player.developmentCards)
+    ? player.developmentCards.length
+    : (player.developmentCards ?? 0);
+  const newDevCount = Array.isArray(player.newDevCards)
+    ? player.newDevCards.length
+    : (player.newDevCards ?? 0);
+  const totalDev = devCardCount + newDevCount;
+
+  // Pieces LEFT in the supply (what the server sends). Derive "placed" to
+  // give players a more intuitive read ("3/5 settlements built").
+  const settlementsPlaced = 5 - (player.settlements ?? 5);
+  const citiesPlaced = 4 - (player.cities ?? 4);
+  const roadsPlaced = 15 - (player.roads ?? 15);
+
+  return (
+    <div
+      className={[
+        'relative overflow-hidden rounded-xl p-3 pl-5',
+        isCurrent ? 'bg-surface-highest shadow-ambient' : 'bg-surface-low',
+      ].join(' ')}
+    >
+      <FactionStripe faction={faction} />
+      <div className="flex items-start gap-3">
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-extrabold text-on-primary ${factionClass}`}>
+          {rank + 1}
+        </div>
+        <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex items-center gap-2">
+              <p className="truncate text-base font-bold text-on-surface">{player.name}</p>
+              {isMe ? <Badge tone="secondary">You</Badge> : null}
+              {isCurrent ? <Badge>Turn</Badge> : null}
+            </div>
+            <div className="flex items-baseline gap-1 shrink-0">
+              <span className="text-2xl font-extrabold text-primary">{vp}</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-on-surface/60">/ {victoryTarget} VP</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 text-[10px] font-bold uppercase tracking-wider">
+            {player.hasLongestRoad ? <AchievementPill>Longest Road · +2</AchievementPill> : null}
+            {player.hasLargestArmy ? <AchievementPill>Largest Army · +2</AchievementPill> : null}
+          </div>
+
+          <div className="grid grid-cols-5 gap-2 text-center text-[11px]">
+            <Stat label="Settle" value={settlementsPlaced} max={5} />
+            <Stat label="City" value={citiesPlaced} max={4} />
+            <Stat label="Roads" value={roadsPlaced} max={15} />
+            <Stat label="Knights" value={player.knightsPlayed ?? 0} />
+            <Stat label="Cards" value={resourceCount} sub={totalDev ? `+${totalDev} dev` : undefined} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Badge({ children, tone = 'primary' }) {
+  const cls = tone === 'primary'
+    ? 'bg-primary/10 text-primary'
+    : 'bg-secondary/15 text-secondary';
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${cls}`}>
+      {children}
+    </span>
+  );
+}
+
+function AchievementPill({ children }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary text-on-primary px-2 py-0.5">
+      <Icons.Check size={10} />
+      {children}
+    </span>
+  );
+}
+
+function Stat({ label, value, max, sub }) {
+  return (
+    <div className="flex flex-col items-center gap-0.5 rounded-md bg-surface px-1 py-1.5">
+      <span className="text-base font-extrabold text-on-surface leading-none">
+        {value}{max !== undefined ? <span className="text-[10px] font-normal text-on-surface-variant">/{max}</span> : null}
+      </span>
+      <span className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant">{label}</span>
+      {sub ? <span className="text-[9px] text-on-surface-variant">{sub}</span> : null}
+    </div>
+  );
+}
+
 // ---------- Tab panels (stubs for remaining) ---------------------------
 
 function TabPanel({ tab, onClose }) {
   const TITLES = {
     cards: { title: 'Development Cards', hint: 'Knight, road-building, monopoly and more. Phase 1.9.' },
-    status: { title: 'Expedition Status', hint: 'Scores, achievements, log. Phase 1.9.' },
   };
   const copy = TITLES[tab] ?? { title: tab, hint: 'Coming soon.' };
   return createPortal(
