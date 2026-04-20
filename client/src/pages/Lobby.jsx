@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useGameStore } from '../stores/gameStore';
-import { Button, Card, FactionStripe } from '../components/ui';
+import { Button, Card, FactionStripe, PlayerAvatar } from '../components/ui';
 import { Icons } from '../components/ui/icons';
 
 /**
@@ -130,14 +130,18 @@ function PlayerRow({ player, seatIndex, isYou, isHost }) {
   // seatIndex comes from the player's position in game.players[] — the server
   // doesn't stamp a seatIndex on the player object, so we derive it here.
   const faction = FACTIONS[seatIndex ?? 0] ?? 'red';
-  const initial = (player.name?.[0] ?? '?').toUpperCase();
   return (
     <div className="relative overflow-hidden rounded-xl bg-surface-low p-3 pl-5">
       <FactionStripe faction={faction} />
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface-container text-sm font-bold text-on-surface">
-          {initial}
-        </div>
+        {/* Shared avatar primitive — same visual language as the Board top
+            strip so players see one identity across screens. */}
+        <PlayerAvatar
+          seat={seatIndex ?? 0}
+          name={player.name}
+          size={40}
+          connected={player.connected !== false}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="truncate text-base font-bold text-on-surface">{player.name}</p>

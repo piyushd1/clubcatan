@@ -7,6 +7,7 @@ import {
   hexToPixel,
   vertexPixel,
 } from '../../lib/hex-math';
+import { TerrainSymbol } from './TerrainSymbol';
 
 /**
  * Static pointy-top Catan board, driven by the server `gameState`.
@@ -235,10 +236,30 @@ const EdgeHit = memo(function EdgeHit({ eKey, occupied, highlighted, onClick }) 
 
 // ---------- Hex tile ---------------------------------------------------------
 
+// Tint map: cream silhouette on dark tiles, deep-ink on light tiles so the
+// glyph reads against the terrain fill without shouting over the number token.
+const SYMBOL_TINT = {
+  forest: '#fafaf3',
+  fields: '#1a1c18',
+  hills: '#fafaf3',
+  pasture: '#1a1c18',
+  mountains: '#fafaf3',
+  desert: '#1a1c18',
+};
+
 const HexTile = memo(function HexTile({ hex, hKey, highlighted, isRobber, onClick }) {
   const points = hexPolygonPoints(hex.q, hex.r, HEX.SIZE);
   const fill = TERRAIN_FILL[hex.terrain] ?? '#888';
   const handleClick = onClick ? () => onClick(hKey, hex) : undefined;
+
+  // Terrain silhouette sits behind the number token. 42% of HEX.SIZE means
+  // the glyph stays decorative — a resource cue, not the primary read.
+  const center = hexToPixel(hex.q, hex.r, HEX.SIZE);
+  const symbolSize = HEX.SIZE * 0.9; // symbol's canonical 24-unit box fills this many SVG units
+  const symbolScale = symbolSize / 24;
+  const symbolOpacity = hex.terrain === 'desert' ? 0.35 : 0.55;
+  const symbolColor = SYMBOL_TINT[hex.terrain] ?? '#1a1c18';
+
   return (
     <g onClick={handleClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
       <polygon
@@ -249,6 +270,13 @@ const HexTile = memo(function HexTile({ hex, hKey, highlighted, isRobber, onClic
         strokeOpacity={highlighted ? 1 : 1}
         vectorEffect="non-scaling-stroke"
       />
+      <g
+        transform={`translate(${center.x - symbolSize / 2} ${center.y - symbolSize / 2}) scale(${symbolScale})`}
+        style={{ color: symbolColor, opacity: symbolOpacity }}
+        pointerEvents="none"
+      >
+        <TerrainSymbol terrain={hex.terrain} inSVG />
+      </g>
       {highlighted ? (
         <polygon
           points={points}

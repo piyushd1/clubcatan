@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGameStore } from '../stores/gameStore';
-import { BottomNav, Button, Card, Chip, FactionStripe, ResourceHUD } from '../components/ui';
+import { BottomNav, Button, Card, Chip, FactionStripe, PlayerAvatar, ResourceHUD } from '../components/ui';
 import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
+import { TerrainHexBadge } from '../components/board/TerrainSymbol';
 import { isVertexOnEdge } from '../lib/hex-math';
 
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
@@ -353,7 +354,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
 
         <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar">
           {players.map((p, i) => (
-            <PlayerPip key={p.id} player={p} faction={FACTIONS[i] ?? 'red'} isTurn={i === currentIndex} isYou={p.id === playerId} />
+            <PlayerPip key={p.id} player={p} seat={i} isTurn={i === currentIndex} isYou={p.id === playerId} />
           ))}
         </div>
 
@@ -651,21 +652,62 @@ function HudResourceChip({ resource, count }) {
   );
 }
 
-function PlayerPip({ player, faction, isTurn, isYou }) {
-  const factionColor = {
-    red: 'bg-faction-red',
-    blue: 'bg-faction-blue',
-    green: 'bg-faction-green',
-    gold: 'bg-faction-gold',
-  }[faction] ?? 'bg-outline';
-  const initial = (player.name?.[0] ?? '?').toUpperCase();
+// Compact player card on the top strip. Faction stripe + avatar + name + VP.
+// Active turn lifts with a primary ring + subtle shadow. Longest-Road /
+// Largest-Army pips surface when held so you can see at a glance who's
+// coming for the win.
+const FACTION_HEX = ['#9c4323', '#3b5f7a', '#a48a2e', '#154212', '#6b3b7a', '#2f7a73'];
+
+function PlayerPip({ player, seat, isTurn, isYou }) {
+  const factionColor = FACTION_HEX[seat] ?? FACTION_HEX[0];
+  const vp = player.victoryPoints ?? 0;
+  const connected = player.connected !== false;
+
   return (
-    <div className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 ${isTurn ? 'bg-surface-highest shadow-ambient' : 'bg-surface-high'}`}>
-      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-on-primary ${factionColor}`}>{initial}</span>
-      <span className="flex flex-col leading-none">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface/50">{isYou ? 'You' : player.name}</span>
-        <span className="text-sm font-extrabold text-on-surface">{player.victoryPoints ?? 0} VP</span>
+    <div
+      className={[
+        'relative flex shrink-0 items-center gap-2.5 rounded-xl pl-1.5 pr-3 py-1.5 transition-all',
+        isTurn
+          ? 'bg-surface shadow-ambient ring-2 ring-primary'
+          : 'bg-surface-high ring-1 ring-outline-variant/30',
+      ].join(' ')}
+      style={{ minWidth: 88 }}
+    >
+      {/* Faction stripe — 3px vertical bar pinned to the left edge */}
+      <span
+        aria-hidden="true"
+        className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full"
+        style={{ background: factionColor }}
+      />
+
+      <PlayerAvatar seat={seat} name={player.name} size={28} connected={connected} />
+
+      <span className="flex flex-col leading-tight min-w-0">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface/55 truncate max-w-[64px]">
+          {isYou ? 'You' : player.name}
+        </span>
+        <span className="flex items-baseline gap-1">
+          <span className="text-sm font-extrabold text-on-surface">{vp}</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider text-on-surface/50">VP</span>
+        </span>
       </span>
+
+      {player.hasLongestRoad || player.hasLargestArmy ? (
+        <span className="flex flex-col items-center gap-0.5">
+          {player.hasLongestRoad ? (
+            <span
+              title="Longest Road"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary text-on-primary text-[9px] font-extrabold"
+            >LR</span>
+          ) : null}
+          {player.hasLargestArmy ? (
+            <span
+              title="Largest Army"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-on-secondary text-[9px] font-extrabold"
+            >LA</span>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -1119,18 +1161,75 @@ function TradeRow({ label, selected, onSelect, resources, ratios, disabled }) {
 
 // ---------- Dev card panel ---------------------------------------------
 
+// Each dev card picks an accent terrain so its row's hex badge visually
+// ties back to the board. `glyph` overrides the badge symbol when the
+// terrain's default silhouette doesn't fit the card's theme.
 const DEV_CARD_LABELS = {
-  knight: { title: 'Knight', body: 'Move the robber. If two players have three Knights, you claim Largest Army.' },
-  roadBuilding: { title: 'Road Building', body: 'Place two roads for free on your next two taps.' },
-  yearOfPlenty: { title: 'Year of Plenty', body: 'Take any two resources from the bank.' },
-  monopoly: { title: 'Monopoly', body: 'Choose a resource — every other player hands you all of theirs.' },
-  victoryPoint: { title: 'Victory Point', body: 'Counted toward your score at the end of the game. Not played.' },
+  knight: {
+    title: 'Knight',
+    body: 'Move the robber. Three knights played claims Largest Army.',
+    accentTerrain: 'mountains',
+  },
+  roadBuilding: {
+    title: 'Road Building',
+    body: 'Place two roads for free on your next two taps.',
+    accentTerrain: 'forest',
+  },
+  yearOfPlenty: {
+    title: 'Year of Plenty',
+    body: 'Take any two resources from the bank.',
+    accentTerrain: 'fields',
+  },
+  monopoly: {
+    title: 'Monopoly',
+    body: 'Choose a resource — every other player hands you all of theirs.',
+    accentTerrain: 'hills',
+  },
+  victoryPoint: {
+    title: 'Victory Point',
+    body: 'Counted toward your score at the end of the game. Not played.',
+    accentTerrain: 'pasture',
+    // Override: pasture's sheep silhouette doesn't read "victory"; show a
+    // trophy instead. The hex background still uses the pasture color so
+    // VP cards read as sibling-of-pasture in the hand list.
+    glyphIcon: 'Trophy',
+  },
 };
 
 function countCards(list) {
   const map = {};
   for (const c of list ?? []) map[c] = (map[c] ?? 0) + 1;
   return map;
+}
+
+/**
+ * Hex-shaped accent badge for a dev card row. Uses the card's accentTerrain
+ * for the hex fill + terrain silhouette; if the card's meta specifies a
+ * `glyphIcon` (e.g. Trophy for VP), we render that icon inside the hex
+ * instead of the terrain's native silhouette.
+ */
+function DevCardBadge({ meta, size = 56 }) {
+  if (!meta?.accentTerrain) return null;
+  if (meta.glyphIcon && Icons[meta.glyphIcon]) {
+    const Glyph = Icons[meta.glyphIcon];
+    // Wrap the icon as an SVG group positioned to the center of the 24-unit
+    // viewBox TerrainHexBadge uses, scaled so the glyph reads at badge size.
+    return (
+      <TerrainHexBadge
+        terrain={meta.accentTerrain}
+        size={size}
+        glyph={
+          <g transform="translate(6 6) scale(0.5)">
+            {/* Glyph is rendered through the Icons catalog which produces a
+                full <svg>. We read its path children by rendering it once
+                and let CSS + opacity style the color. */}
+            <Glyph size={24} />
+          </g>
+        }
+      />
+    );
+  }
+  return <TerrainHexBadge terrain={meta.accentTerrain} size={size} />;
 }
 
 function DevCardPanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, pushNotification }) {
@@ -1226,33 +1325,38 @@ function DevCardPanel({ me, game, client, isMyTurn, turnPhase, phase, onClose, p
                   const meta = DEV_CARD_LABELS[cardType] ?? { title: cardType, body: '' };
                   const isPlayable = cardType !== 'victoryPoint' && tradable && !alreadyPlayedThisTurn;
                   return (
-                    <div key={cardType} className="rounded-md bg-surface-low p-3 flex flex-col gap-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <p className="text-sm font-bold text-on-surface">{meta.title} <span className="text-on-surface-variant font-normal">× {count}</span></p>
-                          <p className="text-xs text-on-surface-variant mt-0.5">{meta.body}</p>
-                        </div>
-                        {cardType === 'victoryPoint' ? null : (
-                          <Button size="sm" disabled={!isPlayable || busy}
-                            onClick={() => {
-                              if (cardType === 'monopoly') setMonopolyPick('__open__');
-                              else play(cardType);
-                            }}
-                          >Play</Button>
-                        )}
+                    <div key={cardType} className="rounded-md bg-surface-low p-3 flex items-center gap-3">
+                      <DevCardBadge meta={meta} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-on-surface">{meta.title} <span className="text-on-surface-variant font-normal">× {count}</span></p>
+                        <p className="text-xs text-on-surface-variant mt-0.5">{meta.body}</p>
                       </div>
+                      {cardType === 'victoryPoint' ? null : (
+                        <Button size="sm" disabled={!isPlayable || busy}
+                          onClick={() => {
+                            if (cardType === 'monopoly') setMonopolyPick('__open__');
+                            else play(cardType);
+                          }}
+                        >Play</Button>
+                      )}
                     </div>
                   );
                 })}
 
-                {/* Bought-this-turn cards — show the type so users know what's
-                    coming, with a lock badge since they can't be played yet (#3). */}
+                {/* Bought-this-turn cards — same hex badge treatment but with
+                    a dashed/faded wrapper so you can see they're owed but
+                    still locked until next turn. */}
                 {Object.entries(countCards(bought)).map(([cardType, count]) => {
                   const meta = DEV_CARD_LABELS[cardType] ?? { title: cardType, body: '' };
                   return (
-                    <div key={`new-${cardType}`} className="rounded-md bg-surface-low p-3 flex items-start justify-between gap-3 opacity-70">
-                      <div className="flex-1">
-                        <p className="text-sm font-bold text-on-surface flex items-center gap-2">
+                    <div
+                      key={`new-${cardType}`}
+                      className="rounded-md bg-surface-low/60 p-3 flex items-center gap-3 opacity-70 ring-1 ring-outline-variant/40 ring-dashed"
+                      style={{ borderStyle: 'dashed' }}
+                    >
+                      <DevCardBadge meta={meta} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-on-surface flex items-center gap-2 flex-wrap">
                           {meta.title}
                           <span className="text-on-surface-variant font-normal">× {count}</span>
                           <span className="inline-flex items-center gap-1 rounded-full bg-surface-high px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
