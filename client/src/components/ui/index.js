@@ -4,3 +4,4 @@ export { Chip } from './Chip';
 export { ResourceHUD } from './ResourceHUD';
 export { BottomNav } from './BottomNav';
 export { FactionStripe } from './FactionStripe';
+export { PlayerAvatar } from './PlayerAvatar';

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGameStore } from '../stores/gameStore';
-import { BottomNav, Button, Card, Chip, FactionStripe, ResourceHUD } from '../components/ui';
+import { BottomNav, Button, Card, Chip, FactionStripe, PlayerAvatar, ResourceHUD } from '../components/ui';
 import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
 import { TerrainHexBadge } from '../components/board/TerrainSymbol';
@@ -354,7 +354,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
 
         <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar">
           {players.map((p, i) => (
-            <PlayerPip key={p.id} player={p} faction={FACTIONS[i] ?? 'red'} isTurn={i === currentIndex} isYou={p.id === playerId} />
+            <PlayerPip key={p.id} player={p} seat={i} isTurn={i === currentIndex} isYou={p.id === playerId} />
           ))}
         </div>
 
@@ -652,21 +652,62 @@ function HudResourceChip({ resource, count }) {
   );
 }
 
-function PlayerPip({ player, faction, isTurn, isYou }) {
-  const factionColor = {
-    red: 'bg-faction-red',
-    blue: 'bg-faction-blue',
-    green: 'bg-faction-green',
-    gold: 'bg-faction-gold',
-  }[faction] ?? 'bg-outline';
-  const initial = (player.name?.[0] ?? '?').toUpperCase();
+// Compact player card on the top strip. Faction stripe + avatar + name + VP.
+// Active turn lifts with a primary ring + subtle shadow. Longest-Road /
+// Largest-Army pips surface when held so you can see at a glance who's
+// coming for the win.
+const FACTION_HEX = ['#9c4323', '#3b5f7a', '#a48a2e', '#154212', '#6b3b7a', '#2f7a73'];
+
+function PlayerPip({ player, seat, isTurn, isYou }) {
+  const factionColor = FACTION_HEX[seat] ?? FACTION_HEX[0];
+  const vp = player.victoryPoints ?? 0;
+  const connected = player.connected !== false;
+
   return (
-    <div className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 ${isTurn ? 'bg-surface-highest shadow-ambient' : 'bg-surface-high'}`}>
-      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-on-primary ${factionColor}`}>{initial}</span>
-      <span className="flex flex-col leading-none">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface/50">{isYou ? 'You' : player.name}</span>
-        <span className="text-sm font-extrabold text-on-surface">{player.victoryPoints ?? 0} VP</span>
+    <div
+      className={[
+        'relative flex shrink-0 items-center gap-2.5 rounded-xl pl-1.5 pr-3 py-1.5 transition-all',
+        isTurn
+          ? 'bg-surface shadow-ambient ring-2 ring-primary'
+          : 'bg-surface-high ring-1 ring-outline-variant/30',
+      ].join(' ')}
+      style={{ minWidth: 88 }}
+    >
+      {/* Faction stripe — 3px vertical bar pinned to the left edge */}
+      <span
+        aria-hidden="true"
+        className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full"
+        style={{ background: factionColor }}
+      />
+
+      <PlayerAvatar seat={seat} name={player.name} size={28} connected={connected} />
+
+      <span className="flex flex-col leading-tight min-w-0">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface/55 truncate max-w-[64px]">
+          {isYou ? 'You' : player.name}
+        </span>
+        <span className="flex items-baseline gap-1">
+          <span className="text-sm font-extrabold text-on-surface">{vp}</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider text-on-surface/50">VP</span>
+        </span>
       </span>
+
+      {player.hasLongestRoad || player.hasLargestArmy ? (
+        <span className="flex flex-col items-center gap-0.5">
+          {player.hasLongestRoad ? (
+            <span
+              title="Longest Road"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary text-on-primary text-[9px] font-extrabold"
+            >LR</span>
+          ) : null}
+          {player.hasLargestArmy ? (
+            <span
+              title="Largest Army"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-on-secondary text-[9px] font-extrabold"
+            >LA</span>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
 }
