@@ -72,6 +72,17 @@ export const Icons = {
     <><path d="M2 20l7-11 4 5 3-4 6 10z" /><path d="M9 9l4 5" /></>,
     size, p
   ),
+  // Trophy: cup on a short base, for VP dev cards.
+  Trophy: ({ size = 20, ...p }) => base(
+    <>
+      <path d="M7 3h10v4a5 5 0 0 1-10 0Z" />
+      <path d="M7 5H4a2 2 0 0 0 0 4h3" />
+      <path d="M17 5h3a2 2 0 0 1 0 4h-3" />
+      <path d="M10 13h4v3a2 2 0 0 1-2 2 2 2 0 0 1-2-2Z" />
+      <path d="M8 21h8" />
+    </>,
+    size, p
+  ),
 };
 
 // Convenient map from resource id → icon component (for data-driven rows).
