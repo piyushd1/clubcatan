@@ -4,6 +4,7 @@ import { useGameStore } from '../stores/gameStore';
 import { BottomNav, Button, Card, Chip, FactionStripe, ResourceHUD } from '../components/ui';
 import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
+import { isVertexOnEdge } from '../lib/hex-math';
 
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
 const RESOURCE_TINTS = {
@@ -49,8 +50,27 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   //                 One pending build at a time. Confirm fires the matching
   //                 server call. Dev-card / trade / end-turn paths still
   //                 fire immediately — only placements are two-step.
-  const [pendingSetup, setPendingSetup] = useState({ vertex: null, edge: null });
+  // pendingSetup holds the player's provisional setup placement. After the
+  // settlement commits server-side (but before the road does), we flip
+  // `settlementCommitted` so the user can't re-place the settlement while
+  // they're still trying to land the road. Without this flag, a failed road
+  // Confirm leaves the settlement on the server and the pending UI open,
+  // which is how the user accidentally placed 4 settlements + 1 road.
+  const [pendingSetup, setPendingSetup] = useState({
+    vertex: null,
+    edge: null,
+    settlementCommitted: false,
+  });
   const [pendingBuild, setPendingBuild] = useState(null);
+
+  // Pre-validated at the client: during setup, the pending road must share a
+  // physical vertex with the pending (or committed) settlement. Drives the
+  // Confirm button's enabled state.
+  const setupAdjacencyOk = useMemo(() => {
+    const { vertex, edge } = pendingSetup;
+    if (!vertex || !edge) return false;
+    return isVertexOnEdge(vertex, edge);
+  }, [pendingSetup]);
 
   // Steal chooser modal state: null | { hexKey, players: [{id,name,hasResources}] }
   const [stealChooser, setStealChooser] = useState(null);
@@ -78,7 +98,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   // Clear pending placements whenever turn ownership or phase flips so a
   // pending ghost doesn't leak into someone else's turn after end-turn.
   useEffect(() => {
-    setPendingSetup({ vertex: null, edge: null });
+    setPendingSetup({ vertex: null, edge: null, settlementCommitted: false });
     setPendingBuild(null);
   }, [phase, currentIndex, spectator]);
 
@@ -134,6 +154,9 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
     (vKey, vertex) => {
       if (!client || !isMyTurn) return;
       if (phase === 'setup') {
+        // Once the settlement is locked in on the server, vertex taps become
+        // no-ops — the user is in road-only mode.
+        if (pendingSetup.settlementCommitted) return;
         // Toggle: tap same vertex again to clear; tap different to replace.
         setPendingSetup((prev) =>
           prev.vertex === vKey ? { ...prev, vertex: null } : { ...prev, vertex: vKey }
@@ -183,18 +206,65 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   // ---- Confirm + Reset ---------------------------------------------------
 
   const resetPending = useCallback(() => {
-    setPendingSetup({ vertex: null, edge: null });
+    // Reset only clears pending that hasn't committed. Once the settlement
+    // is locked in, Reset keeps it (can't un-place) and just drops the
+    // pending road — the user is still owed a road placement.
+    setPendingSetup((prev) =>
+      prev.settlementCommitted
+        ? { ...prev, edge: null }
+        : { vertex: null, edge: null, settlementCommitted: false }
+    );
     setPendingBuild(null);
   }, []);
 
   const confirmPlacement = useCallback(async () => {
     if (!client) return;
     if (phase === 'setup') {
-      const { vertex, edge } = pendingSetup;
-      if (!vertex || !edge) {
-        pushNotification('Tap a vertex AND an adjacent edge before Confirm.');
+      const { vertex, edge, settlementCommitted } = pendingSetup;
+      if (!edge) {
+        pushNotification('Tap an adjacent edge for your road.');
         return;
       }
+
+      // Settlement already placed on a prior failed Confirm — skip straight
+      // to the road placement using the settlement's committed vertex.
+      if (settlementCommitted) {
+        if (!vertex) {
+          pushNotification('Settlement is already placed. Tap an edge, then Confirm.');
+          return;
+        }
+        if (!isVertexOnEdge(vertex, edge)) {
+          pushNotification('Road must connect to your new settlement.');
+          return;
+        }
+        try {
+          await client.call('placeRoad', {
+            edgeKey: edge,
+            isSetup: true,
+            lastSettlement: vertex,
+          });
+        } catch (err) {
+          pushNotification(err.message || 'Cannot place road there');
+          return;
+        }
+        setPendingSetup({ vertex: null, edge: null, settlementCommitted: false });
+        try { await client.call('advanceSetup'); }
+        catch (err) { pushNotification(err.message || 'Could not advance'); }
+        return;
+      }
+
+      if (!vertex) {
+        pushNotification('Tap a vertex for your settlement.');
+        return;
+      }
+      if (!isVertexOnEdge(vertex, edge)) {
+        pushNotification('Road must connect to your new settlement.');
+        return;
+      }
+
+      // Two-step commit. If the settlement lands but the road fails, lock
+      // the settlement in so the user can't accidentally place a second one
+      // by tapping a different vertex.
       try {
         await client.call('placeSettlement', { vertexKey: vertex });
       } catch (err) {
@@ -208,10 +278,11 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
           lastSettlement: vertex,
         });
       } catch (err) {
-        pushNotification(err.message || 'Cannot place road there');
+        setPendingSetup({ vertex, edge: null, settlementCommitted: true });
+        pushNotification(err.message || 'Road didn’t land — tap an adjacent edge.');
         return;
       }
-      setPendingSetup({ vertex: null, edge: null });
+      setPendingSetup({ vertex: null, edge: null, settlementCommitted: false });
       try { await client.call('advanceSetup'); }
       catch (err) { pushNotification(err.message || 'Could not advance'); }
       return;
@@ -232,8 +303,10 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   // Composite object passed to HexBoard so it can draw ghost placements.
   const pendingForBoard = useMemo(() => {
     if (phase === 'setup') {
+      // If the settlement's already committed, its real render lives in the
+      // Building layer — skip the ghost so we don't draw it twice.
       return {
-        vertex: pendingSetup.vertex,
+        vertex: pendingSetup.settlementCommitted ? null : pendingSetup.vertex,
         edge: pendingSetup.edge,
         vertexKind: 'settlement',
         ownerIndex: myIndex,
@@ -248,7 +321,12 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
     return null;
   }, [phase, pendingSetup, pendingBuild, myIndex]);
 
-  const hasPending = !!(pendingForBoard && (pendingForBoard.vertex || pendingForBoard.edge));
+  // Confirm/Reset row shows whenever the user is mid-placement. Setup has
+  // an extra trigger: if the settlement committed but the road hasn't, we're
+  // still "in a pending state" — the user owes a road.
+  const hasPending = phase === 'setup'
+    ? !!(pendingSetup.vertex || pendingSetup.edge || pendingSetup.settlementCommitted)
+    : !!pendingBuild;
 
   const onStealPicked = async (playerIdOrNull) => {
     if (!stealChooser) return;
@@ -309,6 +387,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
           turnPhase={turnPhase}
           isMyTurn={isMyTurn}
           pendingSetup={pendingSetup}
+          setupAdjacencyOk={setupAdjacencyOk}
           pendingBuild={pendingBuild}
           hasPending={hasPending}
           currentName={players[currentIndex]?.name}
@@ -449,6 +528,7 @@ function TurnCard({
   turnPhase,
   isMyTurn,
   pendingSetup,
+  setupAdjacencyOk,
   pendingBuild,
   hasPending,
   currentName,
@@ -464,10 +544,25 @@ function TurnCard({
     phase === 'finished' ? 'Expedition Ended' :
     'Expedition in Progress';
 
+  const setupHasBoth = !!(pendingSetup?.vertex && pendingSetup?.edge);
+  const committed = !!pendingSetup?.settlementCommitted;
+
   let status;
+  let warning = null;
   if (!isMyTurn) status = `${currentName ?? '…'} is planning`;
   else if (phase === 'setup') {
-    if (pendingSetup?.vertex && pendingSetup?.edge) status = 'Ready — tap Confirm to place both';
+    if (committed) {
+      if (!pendingSetup?.edge) status = 'Settlement placed. Tap an adjacent edge, then Confirm.';
+      else if (!setupAdjacencyOk) {
+        status = 'Tap a different edge — it has to touch your settlement.';
+        warning = 'Road must connect to the settlement you just placed.';
+      } else status = 'Ready — tap Confirm to place the road.';
+    }
+    else if (setupHasBoth && !setupAdjacencyOk) {
+      status = 'Move the road — it must touch your settlement';
+      warning = 'Roads must share a corner with your new settlement.';
+    }
+    else if (setupHasBoth) status = 'Ready — tap Confirm to place both';
     else if (pendingSetup?.vertex) status = 'Tap an adjacent edge for your road';
     else if (pendingSetup?.edge) status = 'Tap a vertex for your settlement';
     else status = 'Tap a vertex and an edge — then Confirm';
@@ -480,10 +575,22 @@ function TurnCard({
   }
   else status = 'Your move';
 
+  // Gate Confirm: in setup we require BOTH vertex and edge AND they must be
+  // adjacent. In the committed-recovery case, the vertex is already fixed
+  // server-side, so only the pending edge matters.
+  const confirmDisabled = phase === 'setup'
+    ? committed
+      ? !(pendingSetup?.edge && setupAdjacencyOk)
+      : !(setupHasBoth && setupAdjacencyOk)
+    : false;
+
   return (
     <Card tone="low" className="mx-auto flex max-w-md flex-col items-center gap-3 text-center">
       <p className="text-xs font-bold uppercase tracking-wider text-on-surface/50">{phaseLabel}</p>
       <p className="text-lg font-bold text-on-surface">{status}</p>
+      {warning ? (
+        <p className="text-xs font-semibold text-secondary">{warning}</p>
+      ) : null}
       {lastRoll?.total ? (
         <p className="text-sm text-on-surface-variant">
           Last roll: <span className="font-extrabold text-primary">{lastRoll.total}</span>
@@ -497,7 +604,7 @@ function TurnCard({
             className="flex-1"
             icon={<Icons.Check size={16} />}
             onClick={onConfirm}
-            disabled={phase === 'setup' && !(pendingSetup?.vertex && pendingSetup?.edge)}
+            disabled={confirmDisabled}
           >
             Confirm
           </Button>
