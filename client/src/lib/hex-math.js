@@ -79,6 +79,38 @@ export function boardBounds(hexes, size, pad = size) {
   };
 }
 
+/** `v_<q>_<r>_<dir>` → { q, r, dir } */
+export function parseVertexKey(k) {
+  const m = /^v_(-?\d+)_(-?\d+)_(\d)$/.exec(k);
+  return m ? { q: +m[1], r: +m[2], dir: +m[3] } : null;
+}
+
+/** `e_<q>_<r>_<dir>` → { q, r, dir } */
+export function parseEdgeKey(k) {
+  const m = /^e_(-?\d+)_(-?\d+)_(\d)$/.exec(k);
+  return m ? { q: +m[1], r: +m[2], dir: +m[3] } : null;
+}
+
+/**
+ * True iff the given edge touches the given vertex physically (either of the
+ * edge's two endpoints matches the vertex's pixel position). Handles the
+ * "equivalent vertices" problem without porting the engine's equivalence
+ * tables: if two vertex keys resolve to the same pixel, they're the same
+ * vertex. Same for edge endpoints.
+ */
+export function isVertexOnEdge(vKey, eKey, size = HEX?.SIZE ?? 56) {
+  const v = parseVertexKey(vKey);
+  const e = parseEdgeKey(eKey);
+  if (!v || !e) return false;
+  const vp = vertexPixel(v.q, v.r, v.dir, size);
+  const { a, b } = edgeEndpoints(e.q, e.r, e.dir, size);
+  const EPS = 0.5;
+  return (
+    (Math.abs(vp.x - a.x) < EPS && Math.abs(vp.y - a.y) < EPS) ||
+    (Math.abs(vp.x - b.x) < EPS && Math.abs(vp.y - b.y) < EPS)
+  );
+}
+
 export const HEX = {
   SIZE: 56, // circumradius in SVG user units; tune based on target density
   SQRT3,
