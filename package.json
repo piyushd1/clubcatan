@@ -10,7 +10,7 @@
     "build": "npm --prefix client run build",
     "deploy": "npm run build && partykit deploy",
     "test:client": "node client/test-room-code.js",
-    "test:logic": "node tests/test-game.js && node tests/test-edge-cases.js && node tests/test-full-game.js && node tests/test-longest-road-rigorous.js",
+    "test:logic": "node tests/test-game.js && node tests/test-edge-cases.js && node tests/test-full-game.js && node tests/test-longest-road-rigorous.js && node tests/test-special-build.js",
     "test": "npm run test:client && npm run test:logic"
   },
   "devDependencies": {
