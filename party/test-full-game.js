@@ -101,6 +101,9 @@ function giveResources(player, resources) {
   for (const [r, amount] of Object.entries(resources)) {
     player.resources[r] = (player.resources[r] || 0) + amount;
   }
+  GameLogic.calculateTotalResources(player);
+  for (const [r, amount] of []) {
+  }
 }
 
 // Main test suite
@@ -604,6 +607,7 @@ async function runTests() {
   // Give a player more than 7 cards
   const richPlayer = game.players[0];
   richPlayer.resources = { brick: 4, lumber: 4, wool: 4, grain: 0, ore: 0 };
+  GameLogic.calculateTotalResources(richPlayer);
   const totalBefore = getTotalResources(richPlayer);
   logInfo(`${richPlayer.name} has ${totalBefore} cards (> 7)`);
 
@@ -839,6 +843,7 @@ async function runTests() {
   }
   
   currentTestPlayer.resources = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+  GameLogic.calculateTotalResources(currentTestPlayer);
   result = GameLogic.placeRoad(testGame, currentTestPlayer.id, 'e_0_0_0', false, null);
   assert(!result.success, 'Cannot build without resources');
 

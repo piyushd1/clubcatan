@@ -633,6 +633,7 @@ function testCoordinateSystem() {
     
     // Give resources
     game.players[p1Index].resources = { brick: 10, lumber: 10, wool: 0, grain: 0, ore: 0 };
+    GameLogic.calculateTotalResources(game.players[p1Index]);
     
     // Place road at one key format - edge 0 connects v_0 to v_1
     const result1 = GameLogic.placeRoad(game, 'p1', 'e_0_0_0', false, null);
@@ -661,6 +662,7 @@ function testCoordinateSystem() {
     
     // Give resources
     game.players[0].resources = { brick: 10, lumber: 10, wool: 10, grain: 10, ore: 10 };
+    GameLogic.calculateTotalResources(game.players[0]);
     
     // Try to place settlement at adjacent vertex (distance rule violation)
     const adjacentVertex = 'v_0_0_1'; // Adjacent to v_0_0_0
@@ -687,6 +689,7 @@ function testDevCardRules() {
     // Give player some dev cards
     game.players[0].developmentCards = ['knight', 'knight'];
     game.players[0].resources = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+    GameLogic.calculateTotalResources(game.players[0]);
     
     // Play first knight
     const result1 = GameLogic.playDevCard(game, 'p1', 'knight', { hexKey: 'h_0_0' });

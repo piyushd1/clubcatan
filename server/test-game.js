@@ -373,6 +373,7 @@ async function runTests() {
   
   // Give someone more than 7 cards
   game.players[0].resources = { brick: 5, lumber: 5, wool: 0, grain: 0, ore: 0 };
+    GameLogic.calculateTotalResources(game.players[0]);
   
   // Simulate 7 roll
   const robberResult = GameLogic.rollDice(game, currentPlayerId);

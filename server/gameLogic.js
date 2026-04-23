@@ -795,6 +795,7 @@ export function createGame(gameId, hostPlayer, isExtended = false, enableSpecial
       color: PLAYER_COLORS[0],
       turnOrder: null, // Will be set when game starts
       resources: { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 },
+      totalResources: 0,
       developmentCards: [],
       newDevCards: [], // Cards bought this turn (can't be played)
       knightsPlayed: 0,
@@ -844,6 +845,7 @@ export function addPlayer(game, player) {
     color: PLAYER_COLORS[game.players.length],
     turnOrder: null, // Will be set when game starts
     resources: { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 },
+    totalResources: 0,
     developmentCards: [],
     newDevCards: [],
     knightsPlayed: 0,
@@ -964,7 +966,7 @@ export function rollDice(game, playerId) {
     // Check if any player has more than 7 cards
     const playersToDiscard = [];
     game.players.forEach((p, idx) => {
-      const totalCards = Object.values(p.resources).reduce((a, b) => a + b, 0);
+      const totalCards = p.totalResources;
       if (totalCards > 7) {
         playersToDiscard.push({
           playerIndex: idx,
@@ -1029,6 +1031,7 @@ function distributeResources(game, roll) {
           const player = game.players[buildingInfo.owner];
           const amount = buildingInfo.type === 'city' ? 2 : 1;
           player.resources[hex.resource] += amount;
+          player.totalResources += amount;
           gains[buildingInfo.owner][hex.resource] += amount;
         }
       }
@@ -1071,6 +1074,7 @@ export function discardCards(game, playerId, resources) {
   for (const [resource, amount] of Object.entries(resources)) {
     player.resources[resource] -= amount;
   }
+  calculateTotalResources(player);
   
   // Remove from discarding list
   game.discardingPlayers = game.discardingPlayers.filter(d => d.playerIndex !== playerIndex);
@@ -1125,7 +1129,9 @@ export function moveRobber(game, playerId, hexKey, stealFromPlayerId) {
       if (availableResources.length > 0) {
         const stolenResource = availableResources[Math.floor(Math.random() * availableResources.length)];
         victim.resources[stolenResource]--;
+        victim.totalResources--;
         player.resources[stolenResource]++;
+        player.totalResources++;
         
         stolenInfo = {
           resource: stolenResource,
@@ -1244,6 +1250,7 @@ function giveInitialResources(game, vKey, playerIndex) {
     const hex = game.hexes[hexKey(hq, hr)];
     if (hex && hex.resource) {
       player.resources[hex.resource]++;
+      player.totalResources++;
     }
   });
 }
@@ -1550,9 +1557,11 @@ export function playDevCard(game, playerId, cardType, params = {}) {
         if (idx !== playerIndex) {
           totalStolen += p.resources[params.resource];
           p.resources[params.resource] = 0;
+          calculateTotalResources(p);
         }
       });
       player.resources[params.resource] += totalStolen;
+      calculateTotalResources(player);
       break;
       
     case DEV_CARDS.VICTORY_POINT:
@@ -1582,6 +1591,7 @@ export function yearOfPlentyPick(game, playerId, resource) {
   
   const player = game.players[playerIndex];
   player.resources[resource]++;
+  player.totalResources++;
   game.yearOfPlentyPicks--;
   
   return { success: true };
@@ -1669,6 +1679,7 @@ export function bankTrade(game, playerId, giveResource, giveAmount, getResource)
   
   player.resources[giveResource] -= giveAmount;
   player.resources[getResource] += 1;
+  calculateTotalResources(player);
   
   return { success: true };
 }
@@ -1739,11 +1750,15 @@ export function respondToTrade(game, playerId, accept) {
       offerer.resources[resource] -= amount;
       player.resources[resource] += amount;
     }
+    calculateTotalResources(offerer);
+    calculateTotalResources(player);
     
     for (const [resource, amount] of Object.entries(game.tradeOffer.request)) {
       player.resources[resource] -= amount;
       offerer.resources[resource] += amount;
     }
+    calculateTotalResources(offerer);
+    calculateTotalResources(player);
     
     game.tradeOffer = null;
     return { success: true, traded: true };
@@ -1939,6 +1954,14 @@ export function advanceSetup(game, playerId) {
 // HELPER FUNCTIONS
 // ============================================================================
 
+
+/** Helper to calculate total resources and update the cache */
+export function calculateTotalResources(player) {
+  if (!player.resources) return 0;
+  player.totalResources = Object.values(player.resources).reduce((a, b) => a + b, 0);
+  return player.totalResources;
+}
+
 /** Check if a player has enough resources for a given cost */
 function hasResources(player, costs) {
   for (const [resource, amount] of Object.entries(costs)) {
@@ -1954,6 +1977,7 @@ function deductResources(player, costs) {
   for (const [resource, amount] of Object.entries(costs)) {
     player.resources[resource] -= amount;
   }
+  calculateTotalResources(player);
 }
 
 // ============================================================================
@@ -2256,7 +2280,7 @@ export function getPlayerView(game, playerId) {
       developmentCards: isGameOver || idx === playerIndex ? p.developmentCards : p.developmentCards.length,
       newDevCards: isGameOver || idx === playerIndex ? p.newDevCards : p.newDevCards.length,
       // After game over, show everyone's resources; during game, only show own resources
-      resources: isGameOver || idx === playerIndex ? p.resources : Object.values(p.resources).reduce((a, b) => a + b, 0),
+      resources: isGameOver || idx === playerIndex ? p.resources : p.totalResources,
       // After game over, show everyone's hidden VP; during game, only show own
       // (Note: hidden VPs should already be moved to victoryPoints when game ends, 
       // but this is a safety check)
