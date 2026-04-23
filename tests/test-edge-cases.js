@@ -684,6 +684,37 @@ function testCoordinateSystem() {
     assert(!result.valid, 'Distance rule prevents adjacent settlement placement');
     log(`  Error message: ${result.error}`, 'yellow');
   }
+
+  logSubSection('4.6 getVertexAdjacentHexes - Adjacent Hex Retrieval');
+  {
+    const game = GameLogic.createGame('test', { id: 'p1', name: 'Alice' }, false, false);
+
+    // Middle-of-board vertex: v_0_0_0 (top vertex of hex 0,0) borders
+    // hexes (0,0), (0,-1), (1,-1).
+    const midVertex = 'v_0_0_0';
+    const midAdjHexes = GameLogic.getVertexAdjacentHexes(game, midVertex);
+    assert(midAdjHexes.length === 3, 'Middle vertex should have 3 adjacent hexes');
+    const midHexKeys = midAdjHexes.map(h => `${h.q},${h.r}`).sort();
+    assert(midHexKeys.join('|') === '0,-1|0,0|1,-1', 'Correct hexes returned for middle vertex');
+
+    // Edge-of-board vertex: v_0_-2_0 is the top point of the top-most hex,
+    // so only 1 of its 3 potential adjacent hexes is actually on the board.
+    const edgeVertex = 'v_0_-2_0';
+    const edgeAdjHexes = GameLogic.getVertexAdjacentHexes(game, edgeVertex);
+    assert(edgeAdjHexes.length === 1, 'Edge vertex with 1 adjacent hex on board should return 1 hex');
+    assert(edgeAdjHexes[0].q === 0 && edgeAdjHexes[0].r === -2, 'Correct hex returned for edge vertex');
+
+    // Malformed / incomplete vertex keys
+    const invalidFormat = GameLogic.getVertexAdjacentHexes(game, 'invalid_key');
+    assert(invalidFormat.length === 0, 'Malformed vertex key returns empty array');
+    const partialFormat = GameLogic.getVertexAdjacentHexes(game, 'v_0_0');
+    assert(partialFormat.length === 0, 'Incomplete vertex key returns empty array');
+
+    // Way-off-board vertex: all three adjacent hexes are absent.
+    const offBoardVertex = 'v_10_10_0';
+    const offBoardAdjHexes = GameLogic.getVertexAdjacentHexes(game, offBoardVertex);
+    assert(offBoardAdjHexes.length === 0, 'Off-board vertex returns empty array');
+  }
 }
 
 // =============================================================================

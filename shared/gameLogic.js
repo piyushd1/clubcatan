@@ -216,11 +216,25 @@ const PORT_POSITIONS_EXTENDED = [
 // UTILITY FUNCTIONS
 // ============================================================================
 
+/**
+ * Cryptographically-strong replacement for Math.random(). Returns a float in
+ * [0, 1). We pull 32 bits from the CSPRNG and divide by 2^32 — the full
+ * uint32 space maps cleanly onto JavaScript's 53-bit mantissa, so consumers
+ * like `Math.floor(secureRandom() * 6)` are uniformly distributed.
+ *
+ * Both CF Workers and Node 20+ expose `globalThis.crypto.getRandomValues`.
+ */
+function secureRandom() {
+  const buf = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(buf);
+  return buf[0] / 0x1_0000_0000;
+}
+
 /** Fisher-Yates shuffle algorithm - returns a new shuffled array */
 function shuffle(array) {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(secureRandom() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
@@ -872,7 +886,7 @@ export function startGame(game) {
   // Randomize player order
   const playerOrder = game.players.map((_, idx) => idx);
   for (let i = playerOrder.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(secureRandom() * (i + 1));
     [playerOrder[i], playerOrder[j]] = [playerOrder[j], playerOrder[i]];
   }
   
@@ -953,8 +967,8 @@ export function rollDice(game, playerId) {
     return { success: false, error: 'Cannot roll now' };
   }
   
-  const die1 = Math.floor(Math.random() * 6) + 1;
-  const die2 = Math.floor(Math.random() * 6) + 1;
+  const die1 = Math.floor(secureRandom() * 6) + 1;
+  const die2 = Math.floor(secureRandom() * 6) + 1;
   const total = die1 + die2;
   
   game.diceRoll = { die1, die2, total };
@@ -1123,7 +1137,7 @@ export function moveRobber(game, playerId, hexKey, stealFromPlayerId) {
         .map(([resource, _]) => resource);
       
       if (availableResources.length > 0) {
-        const stolenResource = availableResources[Math.floor(Math.random() * availableResources.length)];
+        const stolenResource = availableResources[Math.floor(secureRandom() * availableResources.length)];
         victim.resources[stolenResource]--;
         player.resources[stolenResource]++;
         
