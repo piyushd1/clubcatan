@@ -21,7 +21,7 @@
  * legacy Socket.io contract so existing tests still apply to gameLogic.js.
  */
 
-import * as GameLogic from './gameLogic.js';
+import * as GameLogic from '../shared/gameLogic.js';
 
 export default class ClubCatanServer {
   constructor(room) {

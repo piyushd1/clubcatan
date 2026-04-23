@@ -1,7 +1,7 @@
 // Rigorous Longest Road Tests
 // Tests every edge case for longest road calculation
 
-import * as GameLogic from './gameLogic.js';
+import * as GameLogic from '../shared/gameLogic.js';
 
 const COLORS = {
   reset: '\x1b[0m',

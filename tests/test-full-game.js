@@ -1,7 +1,7 @@
 // Comprehensive Catan Game Test Script
 // Tests ALL game mechanics from start to finish
 
-import * as GameLogic from './gameLogic.js';
+import * as GameLogic from '../shared/gameLogic.js';
 
 // Color codes for console output
 const colors = {
