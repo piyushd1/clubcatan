@@ -216,11 +216,21 @@ const PORT_POSITIONS_EXTENDED = [
 // UTILITY FUNCTIONS
 // ============================================================================
 
+/**
+ * Cryptographically secure random number generator
+ * Returns a float between 0 (inclusive) and 1 (exclusive)
+ */
+function secureRandom() {
+  const array = new Uint32Array(1);
+  crypto.getRandomValues(array);
+  return array[0] / (0xffffffff + 1);
+}
+
 /** Fisher-Yates shuffle algorithm - returns a new shuffled array */
 function shuffle(array) {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(secureRandom() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
@@ -872,7 +882,7 @@ export function startGame(game) {
   // Randomize player order
   const playerOrder = game.players.map((_, idx) => idx);
   for (let i = playerOrder.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(secureRandom() * (i + 1));
     [playerOrder[i], playerOrder[j]] = [playerOrder[j], playerOrder[i]];
   }
   
@@ -953,8 +963,8 @@ export function rollDice(game, playerId) {
     return { success: false, error: 'Cannot roll now' };
   }
   
-  const die1 = Math.floor(Math.random() * 6) + 1;
-  const die2 = Math.floor(Math.random() * 6) + 1;
+  const die1 = Math.floor(secureRandom() * 6) + 1;
+  const die2 = Math.floor(secureRandom() * 6) + 1;
   const total = die1 + die2;
   
   game.diceRoll = { die1, die2, total };
@@ -1123,7 +1133,7 @@ export function moveRobber(game, playerId, hexKey, stealFromPlayerId) {
         .map(([resource, _]) => resource);
       
       if (availableResources.length > 0) {
-        const stolenResource = availableResources[Math.floor(Math.random() * availableResources.length)];
+        const stolenResource = availableResources[Math.floor(secureRandom() * availableResources.length)];
         victim.resources[stolenResource]--;
         player.resources[stolenResource]++;
         
