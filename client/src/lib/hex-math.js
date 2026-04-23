@@ -1,7 +1,7 @@
 /**
  * Axial-coordinate hex math for a pointy-top Catan board.
  *
- * Coordinates match the engine in `party/gameLogic.js`:
+ * Coordinates match the engine in `shared/gameLogic.js`:
  *
  *   Vertices: 0 = top, then clockwise. 1=UR, 2=LR, 3=bottom, 4=LL, 5=UL.
  *   Edges:    0 = upper-right, then clockwise.

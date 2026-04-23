@@ -12,7 +12,7 @@ The rules stay the same; the frontend gets a full redesign guided by the existin
 
 | Area | Decision |
 |---|---|
-| Game rules | Keep Catan rules as-is; preserve [server/gameLogic.js](../../server/gameLogic.js) (2,309 LOC) nearly verbatim |
+| Game rules | Keep Catan rules as-is; preserve [shared/gameLogic.js](../../shared/gameLogic.js) (2,309 LOC) nearly verbatim |
 | Form factor | Installable PWA (manifest + service worker + "Add to Home Screen") |
 | Aesthetic | Adopt existing `wilderbound/DESIGN.md` ("Tactile Naturalist") — Manrope, cream paper `#fafaf3`, forest `#154212`, brick `#9c4323`, no-line rule, glassmorphic HUD |
 | Phase 1 board | Var 3 (full-color playable board from `images-inspiration/game_board_var_3_multiplayer/`) |
@@ -27,7 +27,7 @@ The rules stay the same; the frontend gets a full redesign guided by the existin
 
 **Client:** Preact 10 + `preact/compat` (drops into Vite via alias — all existing `import React from 'react'` code works untouched) · Vite 5 · Tailwind CSS · Zustand + **mutative** for game state (so full-snapshot reducers preserve object identities on untouched branches — see §1.7) · `idb` for IndexedDB · `partysocket` WebSocket client (replaces `socket.io-client`) · `vite-plugin-pwa` + Workbox · `@fontsource-variable/manrope` · `@use-gesture/react` for pinch/pan.
 
-**Server:** PartyKit (Cloudflare-backed). Port [server/gameLogic.js](../../server/gameLogic.js) verbatim; rewrite [server/index.js](../../server/index.js) socket handlers (~886 LOC) as PartyKit `onMessage` handlers, preserving the existing event contract so tests still apply.
+**Server:** PartyKit (Cloudflare-backed). Port [shared/gameLogic.js](../../shared/gameLogic.js) verbatim; rewrite [server/index.js](../../server/index.js) socket handlers (~886 LOC) as PartyKit `onMessage` handlers, preserving the existing event contract so tests still apply.
 
 **Deploy:** **Single unified PartyKit project.** Vite builds the client to `client/dist/`; `partykit.json` declares `"assets": "./client/dist"` so PartyKit serves the static PWA and the realtime server from the same edge. One deploy, one domain.
 
@@ -45,7 +45,7 @@ Estimated 1–2 weekends of evening work. Order matters — later steps depend o
 ### 1.2 Server → PartyKit
 
 - New top-level `party/` directory (PartyKit convention).
-- Copy `server/gameLogic.js` → `party/gameLogic.js` unchanged (pure module, no I/O).
+- Copy `shared/gameLogic.js` → `shared/gameLogic.js` unchanged (pure module, no I/O).
 - New `party/server.js` implementing `Party.Server` with `onConnect`, `onMessage`, `onClose`. Translate each Socket.io event from `server/index.js` into a typed JSON envelope: `{ type: 'roll_dice', payload: {...} }`. Keep event names and payloads identical so existing test fixtures still apply.
 - Rooms map to PartyKit rooms (the 6-letter room code is the room ID).
 - Keep the existing `test-*.js` server tests; run against the ported `gameLogic.js` (tests exercise pure logic, not sockets).
@@ -354,7 +354,7 @@ Own planning pass when Phase 1 is stable. Lighter detail here:
 | `README.md`, `LICENSE` | Update — standalone project, credit upstream |
 | `partykit.json` | **Create** — unified deploy config with static assets |
 | `party/server.js` | **Create** — PartyKit room handler (~400 LOC) |
-| `party/gameLogic.js` | **Copy** from `server/gameLogic.js` unchanged |
+| `shared/gameLogic.js` | **Copy** from `shared/gameLogic.js` unchanged |
 | `server/`, `render.yaml`, keepalive ping in `App.jsx` | **Delete** after PartyKit migration lands |
 | `client/package.json` | Swap deps: remove `react`/`react-dom`/`socket.io-client`; add `preact`, `@preact/preset-vite`, `partysocket`, `zustand`, `mutative`, `idb`, `@fontsource-variable/manrope`, `@use-gesture/react`, `vite-plugin-pwa`, `tailwindcss`, etc. |
 | `client/vite.config.js` | Add `@preact/preset-vite`, React→Preact aliases, `vite-plugin-pwa` |
@@ -379,7 +379,7 @@ Own planning pass when Phase 1 is stable. Lighter detail here:
 
 Run end-to-end on real phones, not just simulators.
 
-1. **Game logic unchanged** — `node test-*.js` against ported `party/gameLogic.js` all pass.
+1. **Game logic unchanged** — `node test-*.js` against ported `shared/gameLogic.js` all pass.
 2. **Multiplayer flow** — lobby on iPhone, join from Android via 6-letter code, start game, play a full turn (dice + build + trade). No desyncs.
 3. **PWA install** — iPhone Safari → Share → Add to Home Screen produces icon with correct name + theme color; our in-app hint appears and dismisses. Android Chrome shows install prompt; installed app opens standalone.
 4. **Default subdomain + SSL** — PartyKit URL (`clubcatan.<you>.partykit.dev`) resolves, serves over HTTPS, PWA installable from it. (Custom domain check only if bound.)

@@ -39,7 +39,7 @@ Both client and server ship from a **single unified PartyKit deploy** — the Vi
 
 ```
 party/          PartyKit server — Durable-Object per room, JSON-envelope
-                protocol. gameLogic.js is the engine, server.js wires it
+                protocol. shared/gameLogic.js is the engine, server.js wires it
                 to WebSocket events.
 client/         Preact + Vite app. src/pages for screens, src/components
                 for primitives, src/lib for the partykit client + IndexedDB
@@ -110,7 +110,7 @@ Longest Road (5+ connected) = 2 VP. Largest Army (3+ knights played) = 2 VP. Fir
 
 ## Credits
 
-Inspired by and originally forked from [Viral-Doshi/catan](https://github.com/Viral-Doshi/catan). The rules engine in `party/gameLogic.js` is ported near-verbatim from that project — huge thanks to [@doshi-viral](https://www.linkedin.com/in/doshi-viral/) for the Catan implementation.
+Inspired by and originally forked from [Viral-Doshi/catan](https://github.com/Viral-Doshi/catan). The rules engine in `shared/gameLogic.js` is ported near-verbatim from that project — huge thanks to [@doshi-viral](https://www.linkedin.com/in/doshi-viral/) for the Catan implementation.
 
 Everything else — the Preact frontend, the PartyKit migration, the PWA shell, the design system, the deploy pipeline — was rebuilt for this project.
 

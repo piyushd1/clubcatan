@@ -18,10 +18,10 @@
  *     Personal:      { type: '<event>', ... }              (sent to one player)
  *
  * Event and payload names are intentionally kept compatible with the
- * legacy Socket.io contract so existing tests still apply to gameLogic.js.
+ * legacy Socket.io contract so existing tests still apply to shared/gameLogic.js.
  */
 
-import * as GameLogic from './gameLogic.js';
+import * as GameLogic from '../shared/gameLogic.js';
 
 export default class ClubCatanServer {
   constructor(room) {

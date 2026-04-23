@@ -21,7 +21,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import * as GameLogic from './gameLogic.js';
+import * as GameLogic from '../shared/gameLogic.js';
 
 // ============================================================================
 // EXPRESS APP SETUP
