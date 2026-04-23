@@ -1,7 +1,7 @@
 // Comprehensive Edge Case Tests for Catan Game Logic
 // Tests for: Longest Road, Resource Distribution, Hidden VPs, Vertex/Edge Coordinates
 
-import * as GameLogic from './gameLogic.js';
+import * as GameLogic from '../shared/gameLogic.js';
 
 const COLORS = {
   reset: '\x1b[0m',

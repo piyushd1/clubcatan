@@ -1,7 +1,7 @@
 // Comprehensive Catan Game Test Script
 // Tests all game mechanics by simulating 3 players
 
-import * as GameLogic from './gameLogic.js';
+import * as GameLogic from '../shared/gameLogic.js';
 
 // Color codes for console output
 const colors = {
@@ -332,12 +332,22 @@ async function runTests() {
     }
   }
   
-  // Test trading with bank
+  // Test trading with bank. Two sources of non-determinism we normalize here:
+  //   - firstPlayer's setup placements are random, so they may have landed on
+  //     a 3:1 generic port or a 2:1 brick port — use the actual ratio rather
+  //     than hardcoding 4:1.
+  //   - the earlier dice roll may have been a 7, leaving turnPhase='robber'
+  //     (or 'discard'). Force 'main' so the trade/endTurn flow is testable.
   logSection('7. BANK TRADING');
-  
-  firstPlayer.resources.brick = 4;
-  result = GameLogic.bankTrade(game, firstPlayer.id, 'brick', 4, 'ore');
-  assert(result.success, 'Bank trade (4:1) successful');
+
+  game.turnPhase = 'main';
+  game.discardingPlayers = [];
+
+  const firstPlayerIdx = game.players.findIndex(p => p.id === firstPlayer.id);
+  const brickRatio = GameLogic.getTradeRatio(game, firstPlayerIdx, 'brick');
+  firstPlayer.resources.brick = brickRatio;
+  result = GameLogic.bankTrade(game, firstPlayer.id, 'brick', brickRatio, 'ore');
+  assert(result.success, `Bank trade (${brickRatio}:1) successful`);
   assert(firstPlayer.resources.brick === 0, 'Brick deducted correctly');
   assert(firstPlayer.resources.ore > 0, 'Ore received correctly');
   
