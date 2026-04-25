@@ -190,7 +190,7 @@ With more players, resources become more scarce. Focus on building efficiently a
   return (
     <div className="rules-modal-overlay" onClick={onClose}>
       <div className="rules-modal" onClick={e => e.stopPropagation()}>
-        <button className="rules-close-btn" onClick={onClose}>×</button>
+        <button aria-label="Close" className="rules-close-btn" onClick={onClose}>×</button>
         
         <div className="rules-header">
           <h2>📜 Catan Rules</h2>
