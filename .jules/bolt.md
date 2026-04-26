@@ -1,0 +1,3 @@
+## 2025-05-18 - Heavy Regex usage in Hot Paths
+**Learning:** The codebase heavily relies on string keys (`v_q_r_dir`, `e_q_r_dir`) for coordinate mapping. Core game logic algorithms, such as calculating Longest Road via DFS or resolving valid moves, previously executed regular expressions (`match(/v_(-?\d+)...)`) on these keys thousands of times per interaction. This creates an unneeded bottleneck.
+**Action:** When working on tight loops or recursive functions that frequently parse predictable strings (like coordinate string representations), replace Regex matches with custom fast string parsers looping over character codes. This typically yields a massive execution speedup in JavaScript engines.
