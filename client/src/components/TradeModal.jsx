@@ -119,7 +119,7 @@ function TradeModal({ socket, gameState, myPlayer, isMyTurn, onClose, addNotific
     return (
       <div className="modal-overlay" onClick={onClose}>
         <div className="trade-modal" onClick={e => e.stopPropagation()}>
-          <button className="close-btn" onClick={onClose}>×</button>
+          <button className="close-btn" onClick={onClose} aria-label="Close trade modal">×</button>
           
           <h2>Trade Offer from {trader.name}</h2>
           
@@ -167,7 +167,7 @@ function TradeModal({ socket, gameState, myPlayer, isMyTurn, onClose, addNotific
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="trade-modal" onClick={e => e.stopPropagation()}>
-        <button className="close-btn" onClick={onClose}>×</button>
+        <button className="close-btn" onClick={onClose} aria-label="Close trade modal">×</button>
         
         <h2>Trade</h2>
         
