@@ -1,0 +1,3 @@
+## 2024-06-25 - Regex in hot paths
+**Learning:** Coordinate string keys (like `v_q_r_dir` and `e_q_r_dir`) are heavily used in core game logic functions like distance checks, resource distribution, and pathfinding. Using `key.match(/v_(-?\d+)_(-?\d+)_(\d+)/)` inside nested loops or deep recursions causes significant performance bottlenecks because regex object instantiation and matching are slow.
+**Action:** Avoid regex matching for heavily used string keys. Use fast custom string parsing loops (like `indexOf` and `slice` or character code matching) to extract components from keys in hot paths.
