@@ -106,7 +106,7 @@ function DevCardModal({ socket, myPlayer, isMyTurn, turnPhase, yearOfPlentyPicks
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="dev-card-modal" onClick={e => e.stopPropagation()}>
-        <button className="close-btn" onClick={onClose}>×</button>
+        <button aria-label="Close development cards" className="close-btn" onClick={onClose}>×</button>
         
         <h2>Development Cards</h2>
 
