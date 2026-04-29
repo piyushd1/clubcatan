@@ -46,6 +46,46 @@ export const RESOURCES = {
  * Terrain types mapped to their produced resources and display colors
  * Desert produces no resources and is where the robber starts
  */
+/**
+ * Fast custom string parser for coordinate keys (v_q_r_dir or e_q_r_dir).
+ * Replaces slow Regex matching in hot paths.
+ * Returns an array compatible with match results: [fullKey, q, r, dir] where q, r, dir are integers.
+ */
+function parseCoordinateKey(key) {
+  if (!key || key.length < 7 || (key[0] !== 'v' && key[0] !== 'e') || key[1] !== '_') return null;
+
+  let q = 0, r = 0, dir = 0;
+  let qSign = 1, rSign = 1;
+  let p = 2; // skip v_ or e_
+
+  if (key[p] === '-') { qSign = -1; p++; }
+  let startP = p;
+  while (p < key.length && key[p] !== '_') {
+    q = q * 10 + (key.charCodeAt(p) - 48);
+    p++;
+  }
+  if (p === startP || p >= key.length) return null;
+  p++; // skip _
+
+  if (key[p] === '-') { rSign = -1; p++; }
+  startP = p;
+  while (p < key.length && key[p] !== '_') {
+    r = r * 10 + (key.charCodeAt(p) - 48);
+    p++;
+  }
+  if (p === startP || p >= key.length) return null;
+  p++; // skip _
+
+  startP = p;
+  while (p < key.length) {
+    dir = dir * 10 + (key.charCodeAt(p) - 48);
+    p++;
+  }
+  if (p === startP) return null;
+
+  return [key, q * qSign, r * rSign, dir];
+}
+
 export const TERRAIN = {
   HILLS: { name: 'hills', resource: RESOURCES.BRICK, color: '#c45a2c' },
   FOREST: { name: 'forest', resource: RESOURCES.LUMBER, color: '#2d5a27' },
@@ -355,12 +395,12 @@ function getEquivalentVertices(q, r, dir) {
 export function areVerticesEqual(vKey1, vKey2) {
   if (vKey1 === vKey2) return true;
   
-  const match1 = vKey1.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
-  const match2 = vKey2.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match1 = parseCoordinateKey(vKey1);
+  const match2 = parseCoordinateKey(vKey2);
   if (!match1 || !match2) return false;
   
-  const q1 = parseInt(match1[1]), r1 = parseInt(match1[2]), dir1 = parseInt(match1[3]);
-  const q2 = parseInt(match2[1]), r2 = parseInt(match2[2]), dir2 = parseInt(match2[3]);
+  const q1 = match1[1], r1 = match1[2], dir1 = match1[3];
+  const q2 = match2[1], r2 = match2[2], dir2 = match2[3];
   
   // Get all equivalent vertices for vKey1 and check if vKey2 matches any
   const equivalents = getEquivalentVertices(q1, r1, dir1);
@@ -376,10 +416,10 @@ export function areVerticesEqual(vKey1, vKey2) {
  * Checks all equivalent vertex keys to handle shared vertices
  */
 function hasPlayerBuildingAtVertex(game, vKey, playerIndex) {
-  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(vKey);
   if (!match) return false;
   
-  const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
+  const q = match[1], r = match[2], dir = match[3];
   const equivalents = getEquivalentVertices(q, r, dir);
   
   // Check all equivalent vertex keys for a building owned by the player
@@ -395,10 +435,10 @@ function hasPlayerBuildingAtVertex(game, vKey, playerIndex) {
 
 /** Check if ANY building exists at a vertex (for distance rule validation) */
 function hasBuildingAtVertex(game, vKey) {
-  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(vKey);
   if (!match) return false;
   
-  const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
+  const q = match[1], r = match[2], dir = match[3];
   const equivalents = getEquivalentVertices(q, r, dir);
   
   // Check all equivalent vertex keys for any building
@@ -443,15 +483,15 @@ function getVertexPixelPosition(q, r, dir) {
  * Uses pixel positions to verify - adjacent vertices are exactly HEX_SIZE apart
  */
 function areVerticesAdjacent(vKey1, vKey2) {
-  const match1 = vKey1.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
-  const match2 = vKey2.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match1 = parseCoordinateKey(vKey1);
+  const match2 = parseCoordinateKey(vKey2);
   if (!match1 || !match2) return false;
   
   const pos1 = getVertexPixelPosition(
-    parseInt(match1[1]), parseInt(match1[2]), parseInt(match1[3])
+    match1[1], match1[2], match1[3]
   );
   const pos2 = getVertexPixelPosition(
-    parseInt(match2[1]), parseInt(match2[2]), parseInt(match2[3])
+    match2[1], match2[2], match2[3]
   );
   
   // Calculate distance between vertices
@@ -487,15 +527,15 @@ function hasAdjacentBuilding(game, vKey) {
 
 /** Check if two vertex keys refer to the same physical position using pixel coordinates */
 function areVerticesAtSamePosition(vKey1, vKey2) {
-  const match1 = vKey1.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
-  const match2 = vKey2.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match1 = parseCoordinateKey(vKey1);
+  const match2 = parseCoordinateKey(vKey2);
   if (!match1 || !match2) return false;
   
   const pos1 = getVertexPixelPosition(
-    parseInt(match1[1]), parseInt(match1[2]), parseInt(match1[3])
+    match1[1], match1[2], match1[3]
   );
   const pos2 = getVertexPixelPosition(
-    parseInt(match2[1]), parseInt(match2[2]), parseInt(match2[3])
+    match2[1], match2[2], match2[3]
   );
   
   // Same position if very close
@@ -554,10 +594,10 @@ export function getEquivalentEdges(q, r, dir) {
  * Returns road info if found, null otherwise
  */
 function hasRoadAtEdge(game, eKey) {
-  const match = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(eKey);
   if (!match) return null;
   
-  const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
+  const q = match[1], r = match[2], dir = match[3];
   const equivalents = getEquivalentEdges(q, r, dir);
   
   for (const eq of equivalents) {
@@ -626,21 +666,21 @@ function getVertexEdgesFromHex(q, r, dir) {
  * Aggregates edges from all equivalent vertex representations and deduplicates
  */
 export function getVertexEdges(vKey) {
-  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(vKey);
   if (!match) return [];
   
-  const q = parseInt(match[1]);
-  const r = parseInt(match[2]);
-  const dir = parseInt(match[3]);
+  const q = match[1];
+  const r = match[2];
+  const dir = match[3];
   
   // Get all equivalent vertex representations
   const equivalentVertices = getEquivalentVertices(q, r, dir);
   
   // Helper to get canonical edge key for deduplication
   function getCanonicalEdgeKey(eKey) {
-    const eMatch = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+    const eMatch = parseCoordinateKey(eKey);
     if (!eMatch) return eKey;
-    const equivs = getEquivalentEdges(parseInt(eMatch[1]), parseInt(eMatch[2]), parseInt(eMatch[3]));
+    const equivs = getEquivalentEdges(eMatch[1], eMatch[2], eMatch[3]);
     // Use the edge key with smallest coordinates as canonical
     equivs.sort((a, b) => a.q - b.q || a.r - b.r || a.dir - b.dir);
     return edgeKey(equivs[0].q, equivs[0].r, equivs[0].dir);
@@ -674,12 +714,12 @@ export function getVertexEdges(vKey) {
  * Verified by pixel position calculations and edge connectivity.
  */
 export function getAdjacentVertices(vKey, hexes) {
-  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(vKey);
   if (!match) return [];
   
-  const q = parseInt(match[1]);
-  const r = parseInt(match[2]);
-  const dir = parseInt(match[3]);
+  const q = match[1];
+  const r = match[2];
+  const dir = match[3];
   
   const adjacent = [];
   
@@ -1244,15 +1284,15 @@ export function placeSettlement(game, playerId, vKey) {
  * Player receives one of each resource from adjacent hexes
  */
 function giveInitialResources(game, vKey, playerIndex) {
-  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(vKey);
   if (!match) return;
   
-  const q = parseInt(match[1]);
-  const r = parseInt(match[2]);
+  const q = match[1];
+  const r = match[2];
   const player = game.players[playerIndex];
   
   // Get all hexes adjacent to this vertex
-  const adjacentHexes = getAdjacentHexesToVertex(q, r, parseInt(match[3]));
+  const adjacentHexes = getAdjacentHexesToVertex(q, r, match[3]);
   
   adjacentHexes.forEach(({ hq, hr }) => {
     const hex = game.hexes[hexKey(hq, hr)];
@@ -1316,12 +1356,12 @@ export function canPlaceRoad(game, playerId, eKey, isSetup = false, lastSettleme
   if (player.roads <= 0) return { valid: false, error: 'No roads left' };
   
   // Parse edge key
-  const match = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(eKey);
   if (!match) return { valid: false, error: 'Invalid edge key' };
   
-  const eq = parseInt(match[1]);
-  const er = parseInt(match[2]);
-  const edir = parseInt(match[3]);
+  const eq = match[1];
+  const er = match[2];
+  const edir = match[3];
   
   // Get vertices at ends of this edge
   const endVertices = getEdgeVertices(eq, er, edir);
@@ -1354,12 +1394,12 @@ export function canPlaceRoad(game, playerId, eKey, isSetup = false, lastSettleme
       const vEdges = getVertexEdges(vKey);
       return vEdges.some(ve => {
         // Check if this is the same edge we're trying to place (need to check equivalents)
-        const veMatch = ve.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
-        const eKeyMatch = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+        const veMatch = parseCoordinateKey(ve);
+        const eKeyMatch = parseCoordinateKey(eKey);
         if (veMatch && eKeyMatch) {
-          const veEquivs = getEquivalentEdges(parseInt(veMatch[1]), parseInt(veMatch[2]), parseInt(veMatch[3]));
+          const veEquivs = getEquivalentEdges(veMatch[1], veMatch[2], veMatch[3]);
           const isCurrentEdge = veEquivs.some(eq => 
-            eq.q === parseInt(eKeyMatch[1]) && eq.r === parseInt(eKeyMatch[2]) && eq.dir === parseInt(eKeyMatch[3])
+            eq.q === eKeyMatch[1] && eq.r === eKeyMatch[2] && eq.dir === eKeyMatch[3]
           );
           if (isCurrentEdge) return false;
         }
@@ -1613,10 +1653,10 @@ export function getPlayerPorts(game, playerIndex) {
     // Check if player has a building at any of the port's vertices
     const hasAccess = port.vertices.some(vKey => {
       // Check all equivalent vertices
-      const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+      const match = parseCoordinateKey(vKey);
       if (!match) return false;
       
-      const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
+      const q = match[1], r = match[2], dir = match[3];
       const equivalents = getEquivalentVertices(q, r, dir);
       
       return equivalents.some(eq => {
@@ -1997,9 +2037,9 @@ function calculateRoadLength(game, playerIndex) {
   
   // Helper to get canonical edge key for visited tracking
   function getCanonicalEdgeKey(eKey) {
-    const match = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+    const match = parseCoordinateKey(eKey);
     if (!match) return eKey;
-    const equivs = getEquivalentEdges(parseInt(match[1]), parseInt(match[2]), parseInt(match[3]));
+    const equivs = getEquivalentEdges(match[1], match[2], match[3]);
     // Use the edge key with smallest coordinates as canonical
     equivs.sort((a, b) => a.q - b.q || a.r - b.r || a.dir - b.dir);
     return edgeKey(equivs[0].q, equivs[0].r, equivs[0].dir);
@@ -2012,10 +2052,10 @@ function calculateRoadLength(game, playerIndex) {
     maxLength = Math.max(maxLength, length);
     
     // Get vertices of this edge
-    const match = edgeKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+    const match = parseCoordinateKey(edgeKey);
     if (!match) return;
     
-    const vertices = getEdgeVertices(parseInt(match[1]), parseInt(match[2]), parseInt(match[3]));
+    const vertices = getEdgeVertices(match[1], match[2], match[3]);
     
     for (const vKey of vertices) {
       // Check if opponent has a settlement here (breaks road) - check all equivalent vertices
@@ -2043,10 +2083,10 @@ function calculateRoadLength(game, playerIndex) {
 
 /** Check if an opponent has a building at a vertex (breaks road continuity) */
 function hasOpponentBuildingAtVertex(game, vKey, playerIndex) {
-  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(vKey);
   if (!match) return false;
   
-  const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
+  const q = match[1], r = match[2], dir = match[3];
   const equivalents = getEquivalentVertices(q, r, dir);
   
   for (const eq of equivalents) {
@@ -2290,12 +2330,12 @@ export function getPlayerView(game, playerId) {
 
 /** Get hexes adjacent to a vertex (for resource distribution display) */
 export function getVertexAdjacentHexes(game, vKey) {
-  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match = parseCoordinateKey(vKey);
   if (!match) return [];
   
-  const q = parseInt(match[1]);
-  const r = parseInt(match[2]);
-  const dir = parseInt(match[3]);
+  const q = match[1];
+  const r = match[2];
+  const dir = match[3];
   
   const adjHexCoords = getAdjacentHexesToVertex(q, r, dir);
   return adjHexCoords

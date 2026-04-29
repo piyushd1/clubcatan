@@ -1,0 +1,3 @@
+## 2024-06-25 - Regex parsing is slow for coordinate keys
+**Learning:** In hot paths, parsing strings using Regex (like `key.match(/v_(-?\d+)_(-?\d+)_(\d+)/)`) for heavily used string keys (such as coordinate keys) is a massive performance bottleneck. The instantiation of match arrays and pattern matching overhead is significant compared to character-by-character string scanning in V8/Node.js.
+**Action:** Replace Regex parsing in hot paths with custom character-by-character string parsers (using `charCodeAt`, `pos` scanning, etc.) when working with heavily accessed coordinate keys or similar strict string formats.
