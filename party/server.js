@@ -290,15 +290,12 @@ const HANDLERS = {
         });
         if (allGains.length > 0) {
           this.broadcast({ type: 'resourcesDistributed', fromRoll: result.roll.total, allGains });
-          game.players.forEach((player, idx) => {
-            const gains = result.resourceGains[idx];
-            if (Object.values(gains).some((v) => v > 0)) {
-              this.sendToPlayer(player.id, {
-                type: 'resourcesReceived',
-                gains,
-                fromRoll: result.roll.total,
-              });
-            }
+          allGains.forEach((gain) => {
+            this.sendToPlayer(gain.playerId, {
+              type: 'resourcesReceived',
+              gains: gain.gains,
+              fromRoll: result.roll.total,
+            });
           });
         }
       }

@@ -43,3 +43,7 @@ coverage/
 # Kept out of version control since they're ~2MB of images and not runtime code.
 images-inspiration/
 
+
+# Agent scratch directories — should never reach the repo
+.jules/
+.Jules/
