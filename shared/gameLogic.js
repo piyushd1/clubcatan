@@ -166,103 +166,6 @@ const NUMBER_TOKENS_EXTENDED = [
  * Port types with their trade ratios
  * Generic ports: 3:1 any resource, Specific ports: 2:1 for that resource
  */
-
-/**
- * Fast custom parser for vertex keys (v_q_r_dir)
- * Replaces expensive Regex matching for hot paths
- * Returns array matching regex output structure: [originalKey, q, r, dir]
- */
-function parseVertexKey(key) {
-  if (!key || key[0] !== 'v' || key[1] !== '_') return null;
-
-  let q = 0, r = 0, dir = 0;
-  let qSign = 1, rSign = 1;
-  let i = 2;
-  const len = key.length;
-
-  // parse q
-  if (key[i] === '-') { qSign = -1; i++; }
-  let start = i;
-  while (i < len && key[i] !== '_') {
-    q = q * 10 + (key.charCodeAt(i) - 48);
-    i++;
-  }
-  if (i === start) return null;
-  q *= qSign;
-  i++; // skip '_'
-
-  // parse r
-  if (i >= len) return null;
-  if (key[i] === '-') { rSign = -1; i++; }
-  start = i;
-  while (i < len && key[i] !== '_') {
-    r = r * 10 + (key.charCodeAt(i) - 48);
-    i++;
-  }
-  if (i === start) return null;
-  r *= rSign;
-  i++; // skip '_'
-
-  // parse dir
-  if (i >= len) return null;
-  start = i;
-  while (i < len) {
-    dir = dir * 10 + (key.charCodeAt(i) - 48);
-    i++;
-  }
-  if (i === start) return null;
-
-  return [key, q, r, dir];
-}
-
-/**
- * Fast custom parser for edge keys (e_q_r_dir)
- * Replaces expensive Regex matching for hot paths
- * Returns array matching regex output structure: [originalKey, q, r, dir]
- */
-function parseEdgeKey(key) {
-  if (!key || key[0] !== 'e' || key[1] !== '_') return null;
-
-  let q = 0, r = 0, dir = 0;
-  let qSign = 1, rSign = 1;
-  let i = 2;
-  const len = key.length;
-
-  // parse q
-  if (key[i] === '-') { qSign = -1; i++; }
-  let start = i;
-  while (i < len && key[i] !== '_') {
-    q = q * 10 + (key.charCodeAt(i) - 48);
-    i++;
-  }
-  if (i === start) return null;
-  q *= qSign;
-  i++; // skip '_'
-
-  // parse r
-  if (i >= len) return null;
-  if (key[i] === '-') { rSign = -1; i++; }
-  start = i;
-  while (i < len && key[i] !== '_') {
-    r = r * 10 + (key.charCodeAt(i) - 48);
-    i++;
-  }
-  if (i === start) return null;
-  r *= rSign;
-  i++; // skip '_'
-
-  // parse dir
-  if (i >= len) return null;
-  start = i;
-  while (i < len) {
-    dir = dir * 10 + (key.charCodeAt(i) - 48);
-    i++;
-  }
-  if (i === start) return null;
-
-  return [key, q, r, dir];
-}
-
 export const PORT_TYPES = {
   GENERIC: { ratio: 3, resource: null, name: '3:1 Port', icon: '⚓' },
   BRICK: { ratio: 2, resource: 'brick', name: 'Brick Port', icon: '🧱' },
@@ -452,8 +355,8 @@ function getEquivalentVertices(q, r, dir) {
 export function areVerticesEqual(vKey1, vKey2) {
   if (vKey1 === vKey2) return true;
   
-  const match1 = parseVertexKey(vKey1);
-  const match2 = parseVertexKey(vKey2);
+  const match1 = vKey1.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match2 = vKey2.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match1 || !match2) return false;
   
   const q1 = parseInt(match1[1]), r1 = parseInt(match1[2]), dir1 = parseInt(match1[3]);
@@ -473,7 +376,7 @@ export function areVerticesEqual(vKey1, vKey2) {
  * Checks all equivalent vertex keys to handle shared vertices
  */
 function hasPlayerBuildingAtVertex(game, vKey, playerIndex) {
-  const match = parseVertexKey(vKey);
+  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return false;
   
   const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
@@ -492,7 +395,7 @@ function hasPlayerBuildingAtVertex(game, vKey, playerIndex) {
 
 /** Check if ANY building exists at a vertex (for distance rule validation) */
 function hasBuildingAtVertex(game, vKey) {
-  const match = parseVertexKey(vKey);
+  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return false;
   
   const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
@@ -540,8 +443,8 @@ function getVertexPixelPosition(q, r, dir) {
  * Uses pixel positions to verify - adjacent vertices are exactly HEX_SIZE apart
  */
 function areVerticesAdjacent(vKey1, vKey2) {
-  const match1 = parseVertexKey(vKey1);
-  const match2 = parseVertexKey(vKey2);
+  const match1 = vKey1.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match2 = vKey2.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match1 || !match2) return false;
   
   const pos1 = getVertexPixelPosition(
@@ -584,8 +487,8 @@ function hasAdjacentBuilding(game, vKey) {
 
 /** Check if two vertex keys refer to the same physical position using pixel coordinates */
 function areVerticesAtSamePosition(vKey1, vKey2) {
-  const match1 = parseVertexKey(vKey1);
-  const match2 = parseVertexKey(vKey2);
+  const match1 = vKey1.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+  const match2 = vKey2.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match1 || !match2) return false;
   
   const pos1 = getVertexPixelPosition(
@@ -651,7 +554,7 @@ export function getEquivalentEdges(q, r, dir) {
  * Returns road info if found, null otherwise
  */
 function hasRoadAtEdge(game, eKey) {
-  const match = parseEdgeKey(eKey);
+  const match = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return null;
   
   const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
@@ -723,7 +626,7 @@ function getVertexEdgesFromHex(q, r, dir) {
  * Aggregates edges from all equivalent vertex representations and deduplicates
  */
 export function getVertexEdges(vKey) {
-  const match = parseVertexKey(vKey);
+  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return [];
   
   const q = parseInt(match[1]);
@@ -735,7 +638,7 @@ export function getVertexEdges(vKey) {
   
   // Helper to get canonical edge key for deduplication
   function getCanonicalEdgeKey(eKey) {
-    const eMatch = parseEdgeKey(eKey);
+    const eMatch = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
     if (!eMatch) return eKey;
     const equivs = getEquivalentEdges(parseInt(eMatch[1]), parseInt(eMatch[2]), parseInt(eMatch[3]));
     // Use the edge key with smallest coordinates as canonical
@@ -771,7 +674,7 @@ export function getVertexEdges(vKey) {
  * Verified by pixel position calculations and edge connectivity.
  */
 export function getAdjacentVertices(vKey, hexes) {
-  const match = parseVertexKey(vKey);
+  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return [];
   
   const q = parseInt(match[1]);
@@ -1341,7 +1244,7 @@ export function placeSettlement(game, playerId, vKey) {
  * Player receives one of each resource from adjacent hexes
  */
 function giveInitialResources(game, vKey, playerIndex) {
-  const match = parseVertexKey(vKey);
+  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return;
   
   const q = parseInt(match[1]);
@@ -1413,7 +1316,7 @@ export function canPlaceRoad(game, playerId, eKey, isSetup = false, lastSettleme
   if (player.roads <= 0) return { valid: false, error: 'No roads left' };
   
   // Parse edge key
-  const match = parseEdgeKey(eKey);
+  const match = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return { valid: false, error: 'Invalid edge key' };
   
   const eq = parseInt(match[1]);
@@ -1451,8 +1354,8 @@ export function canPlaceRoad(game, playerId, eKey, isSetup = false, lastSettleme
       const vEdges = getVertexEdges(vKey);
       return vEdges.some(ve => {
         // Check if this is the same edge we're trying to place (need to check equivalents)
-        const veMatch = parseEdgeKey(ve);
-        const eKeyMatch = parseEdgeKey(eKey);
+        const veMatch = ve.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+        const eKeyMatch = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
         if (veMatch && eKeyMatch) {
           const veEquivs = getEquivalentEdges(parseInt(veMatch[1]), parseInt(veMatch[2]), parseInt(veMatch[3]));
           const isCurrentEdge = veEquivs.some(eq => 
@@ -1710,7 +1613,7 @@ export function getPlayerPorts(game, playerIndex) {
     // Check if player has a building at any of the port's vertices
     const hasAccess = port.vertices.some(vKey => {
       // Check all equivalent vertices
-      const match = parseVertexKey(vKey);
+      const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
       if (!match) return false;
       
       const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
@@ -2094,7 +1997,7 @@ function calculateRoadLength(game, playerIndex) {
   
   // Helper to get canonical edge key for visited tracking
   function getCanonicalEdgeKey(eKey) {
-    const match = parseEdgeKey(eKey);
+    const match = eKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
     if (!match) return eKey;
     const equivs = getEquivalentEdges(parseInt(match[1]), parseInt(match[2]), parseInt(match[3]));
     // Use the edge key with smallest coordinates as canonical
@@ -2109,7 +2012,7 @@ function calculateRoadLength(game, playerIndex) {
     maxLength = Math.max(maxLength, length);
     
     // Get vertices of this edge
-    const match = parseEdgeKey(edgeKey);
+    const match = edgeKey.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
     if (!match) return;
     
     const vertices = getEdgeVertices(parseInt(match[1]), parseInt(match[2]), parseInt(match[3]));
@@ -2140,7 +2043,7 @@ function calculateRoadLength(game, playerIndex) {
 
 /** Check if an opponent has a building at a vertex (breaks road continuity) */
 function hasOpponentBuildingAtVertex(game, vKey, playerIndex) {
-  const match = parseVertexKey(vKey);
+  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return false;
   
   const q = parseInt(match[1]), r = parseInt(match[2]), dir = parseInt(match[3]);
@@ -2387,7 +2290,7 @@ export function getPlayerView(game, playerId) {
 
 /** Get hexes adjacent to a vertex (for resource distribution display) */
 export function getVertexAdjacentHexes(game, vKey) {
-  const match = parseVertexKey(vKey);
+  const match = vKey.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
   if (!match) return [];
   
   const q = parseInt(match[1]);
