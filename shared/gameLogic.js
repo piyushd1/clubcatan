@@ -978,7 +978,8 @@ export function rollDice(game, playerId) {
     // Check if any player has more than 7 cards
     const playersToDiscard = [];
     game.players.forEach((p, idx) => {
-      const totalCards = Object.values(p.resources).reduce((a, b) => a + b, 0);
+      // OPTIMIZATION: Use direct property addition instead of Object.values(p.resources).reduce() to avoid array allocation in a hot path
+      const totalCards = (p.resources.brick || 0) + (p.resources.lumber || 0) + (p.resources.wool || 0) + (p.resources.grain || 0) + (p.resources.ore || 0);
       if (totalCards > 7) {
         playersToDiscard.push({
           playerIndex: idx,
@@ -1067,7 +1068,8 @@ export function discardCards(game, playerId, resources) {
     return { success: false, error: 'You do not need to discard' };
   }
   
-  const totalToDiscard = Object.values(resources).reduce((a, b) => a + b, 0);
+  // OPTIMIZATION: Direct addition is faster than Object.values().reduce(), defaulting to 0 handles missing sparse properties
+  const totalToDiscard = (resources.brick || 0) + (resources.lumber || 0) + (resources.wool || 0) + (resources.grain || 0) + (resources.ore || 0);
   if (totalToDiscard !== discardInfo.cardsToDiscard) {
     return { success: false, error: `Must discard exactly ${discardInfo.cardsToDiscard} cards` };
   }
@@ -2270,7 +2272,8 @@ export function getPlayerView(game, playerId) {
       developmentCards: isGameOver || idx === playerIndex ? p.developmentCards : p.developmentCards.length,
       newDevCards: isGameOver || idx === playerIndex ? p.newDevCards : p.newDevCards.length,
       // After game over, show everyone's resources; during game, only show own resources
-      resources: isGameOver || idx === playerIndex ? p.resources : Object.values(p.resources).reduce((a, b) => a + b, 0),
+      // OPTIMIZATION: Direct property addition is faster in hot path mappings like getPlayerView
+      resources: isGameOver || idx === playerIndex ? p.resources : ((p.resources.brick || 0) + (p.resources.lumber || 0) + (p.resources.wool || 0) + (p.resources.grain || 0) + (p.resources.ore || 0)),
       // After game over, show everyone's hidden VP; during game, only show own
       // (Note: hidden VPs should already be moved to victoryPoints when game ends, 
       // but this is a safety check)
