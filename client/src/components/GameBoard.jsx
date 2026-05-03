@@ -657,6 +657,7 @@ function GameBoard({ socket, gameState, playerId, gameCode, chatMessages, onLeav
               setDismissedTradeId(lastTradeOfferId);
             }}
             title="Dismiss notification"
+            aria-label="Dismiss trade notification"
           >
             ✕
           </button>
