@@ -3,7 +3,7 @@ import './PlayerPanel.css';
 function PlayerPanel({ player, isCurrentTurn, isMe, longestRoad, largestArmy, onRightClick, gameOver = false }) {
   const totalCards = typeof player.resources === 'number' 
     ? player.resources 
-    : Object.values(player.resources).reduce((a, b) => a + b, 0);
+    : (player.resources.brick + player.resources.lumber + player.resources.wool + player.resources.grain + player.resources.ore);
   
   const devCardCount = typeof player.developmentCards === 'number'
     ? player.developmentCards

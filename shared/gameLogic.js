@@ -978,7 +978,9 @@ export function rollDice(game, playerId) {
     // Check if any player has more than 7 cards
     const playersToDiscard = [];
     game.players.forEach((p, idx) => {
-      const totalCards = Object.values(p.resources).reduce((a, b) => a + b, 0);
+      const r = p.resources;
+      // ⚡ Bolt Optimization: Direct property addition avoids allocating arrays via Object.values()
+      const totalCards = r.brick + r.lumber + r.wool + r.grain + r.ore;
       if (totalCards > 7) {
         playersToDiscard.push({
           playerIndex: idx,
@@ -1067,7 +1069,9 @@ export function discardCards(game, playerId, resources) {
     return { success: false, error: 'You do not need to discard' };
   }
   
-  const totalToDiscard = Object.values(resources).reduce((a, b) => a + b, 0);
+  const r = resources;
+  // ⚡ Bolt Optimization: Direct property addition avoids allocating arrays via Object.values()
+  const totalToDiscard = r.brick + r.lumber + r.wool + r.grain + r.ore;
   if (totalToDiscard !== discardInfo.cardsToDiscard) {
     return { success: false, error: `Must discard exactly ${discardInfo.cardsToDiscard} cards` };
   }
@@ -2270,7 +2274,7 @@ export function getPlayerView(game, playerId) {
       developmentCards: isGameOver || idx === playerIndex ? p.developmentCards : p.developmentCards.length,
       newDevCards: isGameOver || idx === playerIndex ? p.newDevCards : p.newDevCards.length,
       // After game over, show everyone's resources; during game, only show own resources
-      resources: isGameOver || idx === playerIndex ? p.resources : Object.values(p.resources).reduce((a, b) => a + b, 0),
+      resources: isGameOver || idx === playerIndex ? p.resources : (p.resources.brick + p.resources.lumber + p.resources.wool + p.resources.grain + p.resources.ore),
       // After game over, show everyone's hidden VP; during game, only show own
       // (Note: hidden VPs should already be moved to victoryPoints when game ends, 
       // but this is a safety check)

@@ -94,7 +94,7 @@ function countPlayerCities(game, playerIndex) {
 }
 
 function getTotalResources(player) {
-  return Object.values(player.resources).reduce((a, b) => a + b, 0);
+  return player.resources.brick + player.resources.lumber + player.resources.wool + player.resources.grain + player.resources.ore;
 }
 
 function giveResources(player, resources) {

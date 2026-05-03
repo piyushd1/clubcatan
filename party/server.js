@@ -283,7 +283,8 @@ const HANDLERS = {
         const allGains = [];
         game.players.forEach((player, idx) => {
           const gains = result.resourceGains[idx];
-          const hasGains = Object.values(gains).some((v) => v > 0);
+          // ⚡ Bolt Optimization: Direct boolean check avoids Object.values().some() overhead in hot resource path
+          const hasGains = (gains.brick > 0 || gains.lumber > 0 || gains.wool > 0 || gains.grain > 0 || gains.ore > 0);
           if (hasGains) {
             allGains.push({ playerId: player.id, playerName: player.name, playerIndex: idx, gains });
           }
@@ -523,11 +524,15 @@ const HANDLERS = {
     if (!playerId || !game) return;
     const playerIdx = game.players.findIndex((p) => p.id === playerId);
     const playerIndices = GameLogic.getPlayersOnHex(game, hexKey, playerIdx);
-    const players = playerIndices.map((idx) => ({
-      id: game.players[idx].id,
-      name: game.players[idx].name,
-      hasResources: Object.values(game.players[idx].resources).reduce((a, b) => a + b, 0) > 0,
-    }));
+    const players = playerIndices.map((idx) => {
+      const r = game.players[idx].resources;
+      // ⚡ Bolt Optimization: Direct property addition is faster than Object.values(resources).reduce(...)
+      return {
+        id: game.players[idx].id,
+        name: game.players[idx].name,
+        hasResources: (r.brick + r.lumber + r.wool + r.grain + r.ore) > 0,
+      };
+    });
     this.ack(conn, ackId, true, { players });
   },
 
