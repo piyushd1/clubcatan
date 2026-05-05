@@ -526,7 +526,7 @@ const HANDLERS = {
     const players = playerIndices.map((idx) => ({
       id: game.players[idx].id,
       name: game.players[idx].name,
-      hasResources: Object.values(game.players[idx].resources).reduce((a, b) => a + b, 0) > 0,
+      hasResources: (game.players[idx].resources.brick + game.players[idx].resources.lumber + game.players[idx].resources.wool + game.players[idx].resources.grain + game.players[idx].resources.ore) > 0,
     }));
     this.ack(conn, ackId, true, { players });
   },

@@ -1550,7 +1550,7 @@ function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
   // and opponents (number). Normalize to a number for display.
   const resourceCount = typeof player.resources === 'number'
     ? player.resources
-    : Object.values(player.resources ?? {}).reduce((a, b) => a + b, 0);
+    : ((player.resources?.brick ?? 0) + (player.resources?.lumber ?? 0) + (player.resources?.wool ?? 0) + (player.resources?.grain ?? 0) + (player.resources?.ore ?? 0));
   const devCardCount = Array.isArray(player.developmentCards)
     ? player.developmentCards.length
     : (player.developmentCards ?? 0);
