@@ -6,6 +6,7 @@ import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
 import { TerrainHexBadge } from '../components/board/TerrainSymbol';
 import { isVertexOnEdge } from '../lib/hex-math';
+import { getTotalResources } from '../../../shared/gameLogic.js';
 
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
 const RESOURCE_TINTS = {
@@ -959,8 +960,8 @@ function PlayerTradeSection({ me, game, client, myIndex, tradable, onClose, push
     });
   };
 
-  const totalOffer = RESOURCE_ORDER.reduce((s, r) => s + (offer[r] ?? 0), 0);
-  const totalRequest = RESOURCE_ORDER.reduce((s, r) => s + (request[r] ?? 0), 0);
+  const totalOffer = getTotalResources(offer);
+  const totalRequest = getTotalResources(request);
   const canPropose =
     tradable &&
     !myOffer &&
@@ -1550,7 +1551,7 @@ function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
   // and opponents (number). Normalize to a number for display.
   const resourceCount = typeof player.resources === 'number'
     ? player.resources
-    : Object.values(player.resources ?? {}).reduce((a, b) => a + b, 0);
+    : getTotalResources(player.resources ?? {});
   const devCardCount = Array.isArray(player.developmentCards)
     ? player.developmentCards.length
     : (player.developmentCards ?? 0);
@@ -1756,7 +1757,7 @@ function DiscardDialog({ required, resources, onSubmit }) {
   const [picks, setPicks] = useState(() =>
     Object.fromEntries(RESOURCE_ORDER.map((r) => [r, 0]))
   );
-  const total = RESOURCE_ORDER.reduce((sum, r) => sum + (picks[r] ?? 0), 0);
+  const total = getTotalResources(picks);
   const adjust = (r, delta) => {
     setPicks((prev) => {
       const curr = prev[r] ?? 0;
