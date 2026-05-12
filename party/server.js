@@ -22,6 +22,7 @@
  */
 
 import * as GameLogic from '../shared/gameLogic.js';
+import { getTotalResources } from '../shared/gameLogic.js';
 
 export default class ClubCatanServer {
   constructor(room) {
@@ -526,7 +527,7 @@ const HANDLERS = {
     const players = playerIndices.map((idx) => ({
       id: game.players[idx].id,
       name: game.players[idx].name,
-      hasResources: Object.values(game.players[idx].resources).reduce((a, b) => a + b, 0) > 0,
+      hasResources: getTotalResources(game.players[idx].resources) > 0,
     }));
     this.ack(conn, ackId, true, { players });
   },
