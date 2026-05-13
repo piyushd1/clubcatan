@@ -119,7 +119,7 @@ function TradeModal({ socket, gameState, myPlayer, isMyTurn, onClose, addNotific
     return (
       <div className="modal-overlay" onClick={onClose}>
         <div className="trade-modal" onClick={e => e.stopPropagation()}>
-          <button className="close-btn" onClick={onClose}>×</button>
+          <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
           
           <h2>Trade Offer from {trader.name}</h2>
           
@@ -167,7 +167,7 @@ function TradeModal({ socket, gameState, myPlayer, isMyTurn, onClose, addNotific
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="trade-modal" onClick={e => e.stopPropagation()}>
-        <button className="close-btn" onClick={onClose}>×</button>
+        <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
         
         <h2>Trade</h2>
         
@@ -208,9 +208,9 @@ function TradeModal({ socket, gameState, myPlayer, isMyTurn, onClose, addNotific
                         <div key={r} className="resource-selector">
                           <span className="icon">{RESOURCE_ICONS[r]}</span>
                           <div className="selector-controls">
-                            <button onClick={() => updateOffer(r, -1)} disabled={offer[r] === 0}>−</button>
+                            <button onClick={() => updateOffer(r, -1)} disabled={offer[r] === 0} aria-label={"Decrease offer " + r}>−</button>
                             <span className="amount">{offer[r]}</span>
-                            <button onClick={() => updateOffer(r, 1)} disabled={offer[r] >= myPlayer.resources[r]}>+</button>
+                            <button onClick={() => updateOffer(r, 1)} disabled={offer[r] >= myPlayer.resources[r]} aria-label={"Increase offer " + r}>+</button>
                           </div>
                           <span className="available">({myPlayer.resources[r]})</span>
                         </div>
@@ -226,9 +226,9 @@ function TradeModal({ socket, gameState, myPlayer, isMyTurn, onClose, addNotific
                         <div key={r} className="resource-selector">
                           <span className="icon">{RESOURCE_ICONS[r]}</span>
                           <div className="selector-controls">
-                            <button onClick={() => updateRequest(r, -1)} disabled={request[r] === 0}>−</button>
+                            <button onClick={() => updateRequest(r, -1)} disabled={request[r] === 0} aria-label={"Decrease request " + r}>−</button>
                             <span className="amount">{request[r]}</span>
-                            <button onClick={() => updateRequest(r, 1)}>+</button>
+                            <button onClick={() => updateRequest(r, 1)} aria-label={"Increase request " + r}>+</button>
                           </div>
                         </div>
                       ))}
