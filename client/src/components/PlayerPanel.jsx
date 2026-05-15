@@ -1,9 +1,10 @@
 import './PlayerPanel.css';
+import { getTotalResources } from '../../../shared/gameLogic.js';
 
 function PlayerPanel({ player, isCurrentTurn, isMe, longestRoad, largestArmy, onRightClick, gameOver = false }) {
   const totalCards = typeof player.resources === 'number' 
     ? player.resources 
-    : Object.values(player.resources).reduce((a, b) => a + b, 0);
+    : getTotalResources(player.resources);
   
   const devCardCount = typeof player.developmentCards === 'number'
     ? player.developmentCards
