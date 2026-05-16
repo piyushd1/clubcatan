@@ -94,7 +94,7 @@ function countPlayerCities(game, playerIndex) {
 }
 
 function getTotalResources(player) {
-  return Object.values(player.resources).reduce((a, b) => a + b, 0);
+  return GameLogic.getTotalResources(player.resources);
 }
 
 function giveResources(player, resources) {
