@@ -1,3 +1,4 @@
+import { getTotalResources } from "../../../shared/gameLogic.js";
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGameStore } from '../stores/gameStore';
@@ -1550,7 +1551,7 @@ function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
   // and opponents (number). Normalize to a number for display.
   const resourceCount = typeof player.resources === 'number'
     ? player.resources
-    : Object.values(player.resources ?? {}).reduce((a, b) => a + b, 0);
+    : player.resources ? getTotalResources(player.resources) : 0;
   const devCardCount = Array.isArray(player.developmentCards)
     ? player.developmentCards.length
     : (player.developmentCards ?? 0);
