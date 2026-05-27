@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { getTotalResources } from '../../../shared/gameLogic';
 import { useGameStore } from '../stores/gameStore';
 import { BottomNav, Button, Card, Chip, FactionStripe, PlayerAvatar, ResourceHUD } from '../components/ui';
 import { Icons, ResourceIcons } from '../components/ui/icons';
@@ -1550,7 +1551,7 @@ function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
   // and opponents (number). Normalize to a number for display.
   const resourceCount = typeof player.resources === 'number'
     ? player.resources
-    : Object.values(player.resources ?? {}).reduce((a, b) => a + b, 0);
+    : getTotalResources(player.resources ?? {});
   const devCardCount = Array.isArray(player.developmentCards)
     ? player.developmentCards.length
     : (player.developmentCards ?? 0);
