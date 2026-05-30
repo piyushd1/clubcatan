@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getTotalResources } from '../../../shared/gameLogic.js';
 import './TradeModal.css';
 
 const RESOURCES = ['brick', 'lumber', 'wool', 'grain', 'ore'];
@@ -41,8 +42,8 @@ function TradeModal({ socket, gameState, myPlayer, isMyTurn, onClose, addNotific
   };
 
   const handleProposeTrade = () => {
-    const hasOffer = Object.values(offer).some(v => v > 0);
-    const hasRequest = Object.values(request).some(v => v > 0);
+    const hasOffer = getTotalResources(offer) > 0;
+    const hasRequest = getTotalResources(request) > 0;
     
     if (!hasOffer || !hasRequest) {
       addNotification('Must offer and request at least one resource');
