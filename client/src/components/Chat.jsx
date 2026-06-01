@@ -28,7 +28,7 @@ function Chat({ messages, onSend, onClose }) {
     <div className="chat-panel">
       <div className="chat-header">
         <h3>💬 Chat</h3>
-        <button className="close-chat" onClick={onClose}>×</button>
+        <button aria-label="Close chat" className="close-chat" onClick={onClose}>×</button>
       </div>
       
       <div className="chat-messages">
