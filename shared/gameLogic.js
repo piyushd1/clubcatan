@@ -292,6 +292,23 @@ export function getHexVertices(q, r) {
  * Normalize a vertex to its canonical key representation
  * Since vertices are shared by 3 hexes, this ensures consistent lookups
  */
+/**
+ * Calculates the total number of resources in a resources object.
+ * Optimized hot path alternative to Object.values(resources).reduce(...)
+ * @param {Object} resources - Player resources object
+ * @returns {number} Total number of resources
+ */
+export function getTotalResources(resources) {
+  if (!resources) return 0;
+  return (
+    (resources.brick || 0) +
+    (resources.lumber || 0) +
+    (resources.wool || 0) +
+    (resources.grain || 0) +
+    (resources.ore || 0)
+  );
+}
+
 export function normalizeVertex(hexQ, hexR, dir, hexes) {
   // Canonical form: use smallest hex coordinates
   const candidates = getEquivalentVertices(hexQ, hexR, dir);
@@ -978,7 +995,7 @@ export function rollDice(game, playerId) {
     // Check if any player has more than 7 cards
     const playersToDiscard = [];
     game.players.forEach((p, idx) => {
-      const totalCards = Object.values(p.resources).reduce((a, b) => a + b, 0);
+      const totalCards = getTotalResources(p.resources);
       if (totalCards > 7) {
         playersToDiscard.push({
           playerIndex: idx,
@@ -1067,7 +1084,7 @@ export function discardCards(game, playerId, resources) {
     return { success: false, error: 'You do not need to discard' };
   }
   
-  const totalToDiscard = Object.values(resources).reduce((a, b) => a + b, 0);
+  const totalToDiscard = getTotalResources(resources);
   if (totalToDiscard !== discardInfo.cardsToDiscard) {
     return { success: false, error: `Must discard exactly ${discardInfo.cardsToDiscard} cards` };
   }
@@ -2270,7 +2287,7 @@ export function getPlayerView(game, playerId) {
       developmentCards: isGameOver || idx === playerIndex ? p.developmentCards : p.developmentCards.length,
       newDevCards: isGameOver || idx === playerIndex ? p.newDevCards : p.newDevCards.length,
       // After game over, show everyone's resources; during game, only show own resources
-      resources: isGameOver || idx === playerIndex ? p.resources : Object.values(p.resources).reduce((a, b) => a + b, 0),
+      resources: isGameOver || idx === playerIndex ? p.resources : getTotalResources(p.resources),
       // After game over, show everyone's hidden VP; during game, only show own
       // (Note: hidden VPs should already be moved to victoryPoints when game ends, 
       // but this is a safety check)
