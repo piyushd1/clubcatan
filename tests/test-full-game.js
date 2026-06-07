@@ -93,8 +93,9 @@ function countPlayerCities(game, playerIndex) {
   return Object.values(game.vertices).filter(v => v.building === 'city' && v.owner === playerIndex).length;
 }
 
-function getTotalResources(player) {
-  return Object.values(player.resources).reduce((a, b) => a + b, 0);
+// getTotalResources is now imported from gameLogic.js
+function getTotalResourcesPlayer(player) {
+  return GameLogic.getTotalResources(player.resources);
 }
 
 function giveResources(player, resources) {
@@ -266,7 +267,7 @@ async function runTests() {
     assert(result.success, `${player.name} placed second settlement`);
 
     // Verify initial resources given (setup phase 1)
-    const totalRes = getTotalResources(player);
+    const totalRes = getTotalResourcesPlayer(player);
     assert(totalRes > 0 || totalRes === 0, `${player.name} received initial resources (${totalRes} cards)`);
 
     // Place road
@@ -604,7 +605,7 @@ async function runTests() {
   // Give a player more than 7 cards
   const richPlayer = game.players[0];
   richPlayer.resources = { brick: 4, lumber: 4, wool: 4, grain: 0, ore: 0 };
-  const totalBefore = getTotalResources(richPlayer);
+  const totalBefore = getTotalResourcesPlayer(richPlayer);
   logInfo(`${richPlayer.name} has ${totalBefore} cards (> 7)`);
 
   // End trader's turn if still in main phase
@@ -619,7 +620,7 @@ async function runTests() {
   game.discardingPlayers = [];
   
   game.players.forEach((p, idx) => {
-    const total = getTotalResources(p);
+    const total = getTotalResourcesPlayer(p);
     if (total > 7) {
       game.discardingPlayers.push({
         playerIndex: idx,
@@ -649,7 +650,7 @@ async function runTests() {
       
       result = GameLogic.discardCards(game, richPlayer.id, toDiscard);
       assert(result.success, 'Discarded cards successfully');
-      assert(getTotalResources(richPlayer) === totalBefore - toDiscardAmount, 'Cards discarded');
+      assert(getTotalResourcesPlayer(richPlayer) === totalBefore - toDiscardAmount, 'Cards discarded');
     }
   }
 
@@ -680,14 +681,14 @@ async function runTests() {
   if (targetHex && victimIdx !== null) {
     const victim = game.players[victimIdx];
     giveResources(victim, { brick: 2 });
-    const victimTotalBefore = getTotalResources(victim);
+    const victimTotalBefore = getTotalResourcesPlayer(victim);
     
     result = GameLogic.moveRobber(game, rollingPlayer.id, targetHex, victim.id);
     assert(result.success, 'Moved robber and stole');
     assert(game.robber === targetHex, 'Robber moved to new hex');
     
     if (victimTotalBefore > 0) {
-      assert(getTotalResources(victim) < victimTotalBefore, 'Victim lost a card');
+      assert(getTotalResourcesPlayer(victim) < victimTotalBefore, 'Victim lost a card');
     }
   }
 
