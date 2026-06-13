@@ -166,6 +166,23 @@ const NUMBER_TOKENS_EXTENDED = [
  * Port types with their trade ratios
  * Generic ports: 3:1 any resource, Specific ports: 2:1 for that resource
  */
+/**
+ * Calculates the total number of resources in a resources object.
+ * Highly optimized for hot paths to avoid array allocation and callback overhead
+ * of Object.values().reduce().
+ *
+ * @param {Object} resources - Object with resource keys and number values
+ * @returns {number} Total count of all resources
+ */
+export function getTotalResources(resources) {
+  if (!resources) return 0;
+  return (resources.brick || 0) +
+         (resources.lumber || 0) +
+         (resources.wool || 0) +
+         (resources.grain || 0) +
+         (resources.ore || 0);
+}
+
 export const PORT_TYPES = {
   GENERIC: { ratio: 3, resource: null, name: '3:1 Port', icon: '⚓' },
   BRICK: { ratio: 2, resource: 'brick', name: 'Brick Port', icon: '🧱' },
@@ -978,7 +995,7 @@ export function rollDice(game, playerId) {
     // Check if any player has more than 7 cards
     const playersToDiscard = [];
     game.players.forEach((p, idx) => {
-      const totalCards = Object.values(p.resources).reduce((a, b) => a + b, 0);
+      const totalCards = getTotalResources(p.resources);
       if (totalCards > 7) {
         playersToDiscard.push({
           playerIndex: idx,
@@ -1067,7 +1084,7 @@ export function discardCards(game, playerId, resources) {
     return { success: false, error: 'You do not need to discard' };
   }
   
-  const totalToDiscard = Object.values(resources).reduce((a, b) => a + b, 0);
+  const totalToDiscard = getTotalResources(resources);
   if (totalToDiscard !== discardInfo.cardsToDiscard) {
     return { success: false, error: `Must discard exactly ${discardInfo.cardsToDiscard} cards` };
   }
@@ -2270,7 +2287,7 @@ export function getPlayerView(game, playerId) {
       developmentCards: isGameOver || idx === playerIndex ? p.developmentCards : p.developmentCards.length,
       newDevCards: isGameOver || idx === playerIndex ? p.newDevCards : p.newDevCards.length,
       // After game over, show everyone's resources; during game, only show own resources
-      resources: isGameOver || idx === playerIndex ? p.resources : Object.values(p.resources).reduce((a, b) => a + b, 0),
+      resources: isGameOver || idx === playerIndex ? p.resources : getTotalResources(p.resources),
       // After game over, show everyone's hidden VP; during game, only show own
       // (Note: hidden VPs should already be moved to victoryPoints when game ends, 
       // but this is a safety check)
