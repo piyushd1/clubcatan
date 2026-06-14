@@ -93,8 +93,10 @@ function countPlayerCities(game, playerIndex) {
   return Object.values(game.vertices).filter(v => v.building === 'city' && v.owner === playerIndex).length;
 }
 
+import { getTotalResources as gameTotalResources } from '../shared/gameLogic.js';
+
 function getTotalResources(player) {
-  return Object.values(player.resources).reduce((a, b) => a + b, 0);
+  return gameTotalResources(player.resources);
 }
 
 function giveResources(player, resources) {
