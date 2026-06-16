@@ -6,7 +6,7 @@ export function LandingToggle({ label, hint, checked, onChange, disabled = false
       aria-pressed={checked}
       aria-disabled={disabled}
       disabled={disabled}
-      className={`flex items-center justify-between gap-4 rounded-md bg-surface p-3 text-left transition-colors ${
+      className={`flex items-center justify-between gap-4 rounded-md bg-surface p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
         disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-container cursor-pointer'
       }`}
     >
