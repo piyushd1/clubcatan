@@ -6,6 +6,7 @@ import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
 import { TerrainHexBadge } from '../components/board/TerrainSymbol';
 import { isVertexOnEdge } from '../lib/hex-math';
+import { getTotalResources } from '../../../shared/gameLogic';
 
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
 const RESOURCE_TINTS = {
@@ -1550,7 +1551,7 @@ function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
   // and opponents (number). Normalize to a number for display.
   const resourceCount = typeof player.resources === 'number'
     ? player.resources
-    : Object.values(player.resources ?? {}).reduce((a, b) => a + b, 0);
+    : getTotalResources(player.resources ?? {});
   const devCardCount = Array.isArray(player.developmentCards)
     ? player.developmentCards.length
     : (player.developmentCards ?? 0);
