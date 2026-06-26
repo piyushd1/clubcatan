@@ -36,6 +36,7 @@ export const BottomNav = forwardRef(function BottomNav(
           'px-5 py-2',
           'text-[10px] font-extrabold uppercase tracking-widest',
           'transition-all duration-200 active:translate-y-0.5',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
           isActive
             ? 'bg-primary text-on-primary'
             : 'text-on-surface/50 hover:text-primary',
