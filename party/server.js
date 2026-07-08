@@ -283,7 +283,7 @@ const HANDLERS = {
         const allGains = [];
         game.players.forEach((player, idx) => {
           const gains = result.resourceGains[idx];
-          const hasGains = Object.values(gains).some((v) => v > 0);
+          const hasGains = GameLogic.getTotalResources(gains) > 0;
           if (hasGains) {
             allGains.push({ playerId: player.id, playerName: player.name, playerIndex: idx, gains });
           }
@@ -526,7 +526,7 @@ const HANDLERS = {
     const players = playerIndices.map((idx) => ({
       id: game.players[idx].id,
       name: game.players[idx].name,
-      hasResources: Object.values(game.players[idx].resources).reduce((a, b) => a + b, 0) > 0,
+      hasResources: GameLogic.getTotalResources(game.players[idx].resources) > 0,
     }));
     this.ack(conn, ackId, true, { players });
   },

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import './DiscardModal.css';
+import { getTotalResources } from '../../../shared/gameLogic.js';
 
 const RESOURCES = ['brick', 'lumber', 'wool', 'grain', 'ore'];
 const RESOURCE_ICONS = {
@@ -13,7 +14,7 @@ const RESOURCE_ICONS = {
 function DiscardModal({ socket, player, cardsToDiscard, addNotification }) {
   const [selected, setSelected] = useState({ brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 });
 
-  const totalSelected = Object.values(selected).reduce((a, b) => a + b, 0);
+  const totalSelected = getTotalResources(selected);
   const remaining = cardsToDiscard - totalSelected;
 
   const updateSelected = (resource, delta) => {
