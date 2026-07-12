@@ -66,6 +66,7 @@ function DiscardModal({ socket, player, cardsToDiscard, addNotification }) {
                 <div className="discard-controls">
                   <button 
                     onClick={() => updateSelected(r, -1)}
+                    aria-label={`Decrease ${r} discard`}
                     disabled={selected[r] === 0}
                   >
                     −
@@ -73,6 +74,7 @@ function DiscardModal({ socket, player, cardsToDiscard, addNotification }) {
                   <span className="discard-amount">{selected[r]}</span>
                   <button 
                     onClick={() => updateSelected(r, 1)}
+                    aria-label={`Increase ${r} discard`}
                     disabled={selected[r] >= available || totalSelected >= cardsToDiscard}
                   >
                     +
