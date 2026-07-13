@@ -1,3 +1,4 @@
+import { parseCoordinateKey } from '../../../shared/gameLogic.js';
 import { useMemo } from 'react';
 import './HexBoard.css';
 
@@ -141,13 +142,13 @@ function HexBoard({
 
   // Parse vertex/edge keys
   const parseVertexKey = (key) => {
-    const match = key.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+    const match = parseCoordinateKey(key);
     if (!match) return null;
     return { q: parseInt(match[1]), r: parseInt(match[2]), dir: parseInt(match[3]) };
   };
 
   const parseEdgeKey = (key) => {
-    const match = key.match(/e_(-?\d+)_(-?\d+)_(\d+)/);
+    const match = parseCoordinateKey(key);
     if (!match) return null;
     return { q: parseInt(match[1]), r: parseInt(match[2]), dir: parseInt(match[3]) };
   };
@@ -614,8 +615,8 @@ function HexBoard({
           const v1Key = port.vertices[0];
           const v2Key = port.vertices[1];
           
-          const v1Match = v1Key.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
-          const v2Match = v2Key.match(/v_(-?\d+)_(-?\d+)_(\d+)/);
+          const v1Match = parseCoordinateKey(v1Key);
+          const v2Match = parseCoordinateKey(v2Key);
           
           if (!v1Match || !v2Match) return null;
           
