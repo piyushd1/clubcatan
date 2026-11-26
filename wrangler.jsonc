@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clubcatan",
+  "main": "party/server.js",
+  "compatibility_date": "2026-11-26",
+
+  // One Durable Object per game room. Binding name `Main` is what
+  // routePartykitRequest matches against the `/parties/main/<ROOM>` path the
+  // client already uses, so no client protocol change is needed.
+  "durable_objects": {
+    "bindings": [{ "name": "Main", "class_name": "ClubCatanServer" }]
+  },
+  // SQLite-backed storage is the only backend on the Workers Free plan and the
+  // recommended one everywhere. Add a new migration entry whenever a Durable
+  // Object class is added, renamed or removed.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ClubCatanServer"] }],
+
+  // The Vite-built PWA. Assets are matched before the Worker runs, except for
+  // `/parties/*`, which must reach the Worker so WebSocket upgrades are routed
+  // to the room. Unknown paths fall back to index.html (SPA routing).
+  "assets": {
+    "directory": "./client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/parties/*"]
+  },
+
+  // Production URL. Cloudflare creates and manages the DNS record and TLS
+  // certificate for a custom domain on a zone in the same account.
+  "routes": [{ "pattern": "catan.piyushdev.com", "custom_domain": true }],
+
+  "observability": { "enabled": true }
+}

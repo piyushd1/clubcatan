@@ -36,7 +36,8 @@ coverage/
 # Misc
 *.pem
 .cache/
-.partykit/
+.wrangler/
+.dev.vars
 .claude/
 
 # Local design references (screenshots, DESIGN.md from inspiration projects).

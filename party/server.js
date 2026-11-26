@@ -1,9 +1,13 @@
 /**
  * ============================================================================
- * CLUBCATAN PARTYKIT SERVER
+ * CLUBCATAN SERVER (PartyServer on Cloudflare Workers + Durable Objects)
  * ============================================================================
  *
- * One PartyKit room per Catan game. The 6-character room ID is the game code.
+ * One Durable Object ("room") per Catan game. The 6-character room ID is the
+ * game code. Clients connect to `/parties/main/<ROOM>`; `routePartykitRequest`
+ * maps the `main` segment to the `Main` Durable Object binding in
+ * wrangler.jsonc. Everything that is not a `/parties/*` request is served from
+ * the static client bundle (`client/dist`) by the Workers assets layer.
  *
  * Client <-> server protocol (JSON over the WebSocket):
  *
@@ -21,19 +25,22 @@
  * legacy Socket.io contract so existing tests still apply to gameLogic.js.
  */
 
+import { Server, routePartykitRequest } from 'partyserver';
 import * as GameLogic from '../shared/gameLogic.js';
 
-export default class ClubCatanServer {
-  constructor(room) {
-    this.room = room;
-    this.game = null;
-    this.playerByConn = new Map(); // connectionId -> playerId
-    this.connByPlayer = new Map(); // playerId -> connectionId
-    // Spectators join once the game is already running. They receive gameState
-    // updates but their hands/dev cards aren't rendered (we send the
-    // no-player view). Cap at 4 to bound fan-out.
-    this.spectatorsByConn = new Map(); // connectionId -> { name }
-  }
+export class ClubCatanServer extends Server {
+  // Let the Durable Object hibernate between messages. Idle rooms cost nothing
+  // and wake on the next WebSocket message. In-memory fields below are rebuilt
+  // on wake; Task 3 moves game state + connection roles into durable storage.
+  static options = { hibernate: true };
+
+  game = null;
+  playerByConn = new Map(); // connectionId -> playerId
+  connByPlayer = new Map(); // playerId -> connectionId
+  // Spectators join once the game is already running. They receive gameState
+  // updates but their hands/dev cards aren't rendered (we send the
+  // no-player view). Cap at 4 to bound fan-out.
+  spectatorsByConn = new Map(); // connectionId -> { name }
 
   // ---------- connection lifecycle ----------
 
@@ -59,7 +66,8 @@ export default class ClubCatanServer {
 
   // ---------- message dispatch ----------
 
-  onMessage(message, sender) {
+  // PartyServer passes (connection, message); PartyKit passed (message, sender).
+  onMessage(sender, message) {
     let msg;
     try {
       msg = JSON.parse(message);
@@ -91,14 +99,15 @@ export default class ClubCatanServer {
     this.sendTo(conn, body);
   }
 
+  // Object-taking wrapper over PartyServer's string `broadcast(message, exclude)`.
   broadcast(data) {
-    this.room.broadcast(JSON.stringify(data));
+    super.broadcast(JSON.stringify(data));
   }
 
   sendToPlayer(playerId, data) {
     const connId = this.connByPlayer.get(playerId);
     if (!connId) return;
-    const conn = this.room.getConnection(connId);
+    const conn = this.getConnection(connId);
     if (conn) this.sendTo(conn, data);
   }
 
@@ -131,7 +140,7 @@ export default class ClubCatanServer {
     // appear as counts only, myIndex is -1.
     const spectatorView = GameLogic.getPlayerView(this.game, '__spectator__');
     for (const connId of this.spectatorsByConn.keys()) {
-      const conn = this.room.getConnection(connId);
+      const conn = this.getConnection(connId);
       if (conn) this.sendTo(conn, { type: 'gameState', state: { ...spectatorView, spectator: true } });
     }
   }
@@ -167,7 +176,7 @@ const HANDLERS = {
     if (this.game) return this.ack(conn, ackId, false, 'A game already exists in this room');
     const playerId = crypto.randomUUID();
     this.game = GameLogic.createGame(
-      this.room.id,
+      this.name,
       { id: playerId, name: playerName },
       isExtended,
       enableSpecialBuild
@@ -176,7 +185,7 @@ const HANDLERS = {
     this.playerByConn.set(conn.id, playerId);
     this.connByPlayer.set(playerId, conn.id);
     this.ack(conn, ackId, true, {
-      gameCode: this.room.id,
+      gameCode: this.name,
       playerId,
       gameState: GameLogic.getPlayerView(this.game, playerId),
     });
@@ -197,7 +206,7 @@ const HANDLERS = {
     this.playerByConn.set(conn.id, playerId);
     this.connByPlayer.set(playerId, conn.id);
     this.ack(conn, ackId, true, {
-      gameCode: this.room.id,
+      gameCode: this.name,
       playerId,
       gameState: GameLogic.getPlayerView(game, playerId),
     });
@@ -218,7 +227,7 @@ const HANDLERS = {
     this.spectatorsByConn.set(conn.id, { name: playerName });
     const view = GameLogic.getPlayerView(game, '__spectator__');
     this.ack(conn, ackId, true, {
-      gameCode: this.room.id,
+      gameCode: this.name,
       gameState: { ...view, spectator: true },
     });
     this.broadcast({ type: 'spectatorJoined', name: playerName });
@@ -547,5 +556,21 @@ const HANDLERS = {
       message,
       timestamp: Date.now(),
     });
+  },
+};
+
+// ============================================================================
+// WORKER ENTRYPOINT
+// ============================================================================
+
+/**
+ * `/parties/main/<ROOM>` → the room's Durable Object (WebSocket upgrade or HTTP).
+ * Everything else → static client assets (wrangler.jsonc `assets`, SPA fallback).
+ * `run_worker_first: ["/parties/*"]` in wrangler.jsonc guarantees the socket
+ * path reaches this handler instead of the asset router.
+ */
+export default {
+  async fetch(request, env) {
+    return (await routePartykitRequest(request, env)) || env.ASSETS.fetch(request);
   },
 };

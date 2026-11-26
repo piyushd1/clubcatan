@@ -29,7 +29,8 @@ export default defineConfig({
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
-            urlPattern: /^https?:\/\/[^/]*\.partykit\.dev\/.*/,
+            // Realtime traffic to the room Durable Object is never cached.
+            urlPattern: ({ url }) => url.pathname.startsWith('/parties/'),
             handler: 'NetworkOnly',
           },
         ],
