@@ -76,7 +76,7 @@ function getValidMainGameRoadPositions(game, playerId) {
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   
   Object.keys(game.edges).forEach(eKey => {
-    const result = GameLogic.canPlaceRoad(game, playerId, eKey, false, null);
+    const result = GameLogic.canPlaceRoad(game, playerId, eKey);
     if (result.valid) {
       valid.push(eKey);
     }
@@ -180,21 +180,22 @@ async function runTests() {
       const roadPos = validRoads[Math.floor(Math.random() * validRoads.length)];
       setupRoads.push({ player: currentPlayer.name, playerIndex: game.currentPlayerIndex, road: roadPos });
       
-      result = GameLogic.placeRoad(game, currentPlayer.id, roadPos, true, settlementPos);
+      const placingIndex = game.currentPlayerIndex;
+      result = GameLogic.placeRoad(game, currentPlayer.id, roadPos);
       assert(result.success, `${currentPlayer.name} placed road at ${roadPos}`);
       
-      const roadsCount = countPlayerRoads(game, game.currentPlayerIndex);
+      const roadsCount = countPlayerRoads(game, placingIndex);
       assert(roadsCount === 1, `${currentPlayer.name} has 1 road in game state`);
       
       // Verify road is stored correctly
       const storedRoad = game.edges[roadPos];
       assert(storedRoad?.road === true, `Road stored correctly at ${roadPos}`);
-      assert(storedRoad?.owner === game.currentPlayerIndex, `Road owner is correct`);
+      assert(storedRoad?.owner === placingIndex, `Road owner is correct`);
+      
+      // Placing the road completes the setup turn; the engine advances itself.
+      assert(game.currentPlayerIndex !== placingIndex || game.setupPhase === 1,
+        `Setup turn advanced for ${currentPlayer.name}`);
     }
-    
-    // Advance setup turn
-    result = GameLogic.advanceSetup(game, currentPlayer.id);
-    assert(result.success, `Setup turn advanced for ${currentPlayer.name}`);
   }
   
   assert(game.setupPhase === 1, 'Setup phase changed to 1');
@@ -228,7 +229,7 @@ async function runTests() {
       const roadPos = validRoads[Math.floor(Math.random() * validRoads.length)];
       setupRoads.push({ player: currentPlayer.name, playerIndex: playerIdx, road: roadPos });
       
-      result = GameLogic.placeRoad(game, currentPlayer.id, roadPos, true, settlementPos);
+      result = GameLogic.placeRoad(game, currentPlayer.id, roadPos);
       assert(result.success, `${currentPlayer.name} placed second road at ${roadPos}`);
       
       const roadsCount = countPlayerRoads(game, playerIdx);
@@ -237,11 +238,11 @@ async function runTests() {
       // Verify road is stored
       const storedRoad = game.edges[roadPos];
       assert(storedRoad?.road === true, `Second road stored correctly at ${roadPos}`);
+      
+      // Road completes the setup turn; the engine advances (or finishes setup).
+      assert(game.currentPlayerIndex !== playerIdx || game.phase === 'playing',
+        `Setup turn advanced for ${currentPlayer.name}`);
     }
-    
-    // Advance setup turn
-    result = GameLogic.advanceSetup(game, currentPlayer.id);
-    assert(result.success, `Setup turn advanced for ${currentPlayer.name}`);
   }
   
   // Verify all roads are stored
@@ -282,6 +283,14 @@ async function runTests() {
   // Check resources were distributed (if not 7)
   if (diceTotal !== 7) {
     assert(game.turnPhase === 'main', 'Turn phase is main after non-7 roll');
+  } else {
+    // A 7 opens the discard/robber flow. Resolve it so building below is legal:
+    // nobody has >7 cards after setup, so the phase is 'robber'. Move the
+    // robber without stealing (no steal target needed).
+    assert(game.turnPhase === 'robber', 'Turn phase is robber after a 7 (nobody over 7 cards)');
+    const target = Object.keys(game.hexes).find((k) => k !== game.robber);
+    result = GameLogic.moveRobber(game, firstPlayer.id, target);
+    assert(result.success && game.turnPhase === 'main', 'Robber moved; turn phase back to main');
   }
   
   // Test building road (if has resources)
@@ -300,7 +309,7 @@ async function runTests() {
   
   if (mainGameRoads.length > 0) {
     const roadPos = mainGameRoads[0];
-    result = GameLogic.placeRoad(game, firstPlayer.id, roadPos, false, null);
+    result = GameLogic.placeRoad(game, firstPlayer.id, roadPos);
     assert(result.success, `${firstPlayer.name} built road during main phase at ${roadPos}`);
     
     const roadsCount = countPlayerRoads(game, game.currentPlayerIndex);

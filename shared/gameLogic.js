@@ -88,6 +88,61 @@ const DEV_CARD_DISTRIBUTION = [
 export const PLAYER_COLORS = ['#e63946', '#457b9d', '#f4a261', '#2a9d8f', '#6a994e', '#9d4edd'];
 
 // ============================================================================
+// INPUT GUARDS
+// ============================================================================
+//
+// The engine is the last line of defence: the server forwards whatever a
+// client sends, so every mutator re-derives "who may act" from game state and
+// rejects malformed payloads instead of trusting the caller.
+
+/** The five valid resource keys, for validating client-supplied names. */
+export const RESOURCE_KEYS = Object.values(RESOURCES);
+
+export function isResourceKey(key) {
+  return typeof key === 'string' && RESOURCE_KEYS.includes(key);
+}
+
+export function isNonNegInt(n) {
+  return Number.isInteger(n) && n >= 0;
+}
+
+/**
+ * Validate a `{ resource: amount }` map from a client. Returns an error string
+ * or null. Unknown keys, non-integers and negative amounts are all rejected —
+ * a negative "discard" or "offer" would otherwise net the sender resources,
+ * and an unknown key would turn totals into NaN.
+ */
+function validateResourceMap(map, label = 'resources') {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return `Invalid ${label}`;
+  for (const [key, amount] of Object.entries(map)) {
+    if (!isResourceKey(key)) return `Invalid resource: ${key}`;
+    if (!isNonNegInt(amount)) return `Invalid amount for ${key}`;
+  }
+  return null;
+}
+
+/** Sum of a validated resource map. */
+function sumResources(map) {
+  return Object.values(map).reduce((a, b) => a + b, 0);
+}
+
+/**
+ * Every in-game action requires an active game. Returns a failure result for
+ * lobby ('waiting') and ended ('finished') games, or null when the game is live.
+ */
+function assertActive(game) {
+  if (game.phase === 'setup' || game.phase === 'playing') return null;
+  return {
+    success: false,
+    error: game.phase === 'finished' ? 'Game is over' : 'Game has not started',
+  };
+}
+
+function isCurrentPlayer(game, playerId) {
+  return game.players[game.currentPlayerIndex]?.id === playerId;
+}
+
+// ============================================================================
 // BOARD LAYOUT CONFIGURATION
 // ============================================================================
 
@@ -793,8 +848,10 @@ export function createGame(gameId, hostPlayer, isExtended = false, enableSpecial
 
   return {
     id: gameId,
+    hostId: hostPlayer.id, // stable across the seat shuffle in startGame
     phase: 'waiting', // waiting, setup, playing, finished
     setupPhase: 0, // 0: first settlements, 1: second settlements (reverse)
+    setupTurn: null, // { settlement, road } placed this setup turn; set by startGame
     currentPlayerIndex: 0,
     turnPhase: 'roll', // roll, main, robber, discard, specialBuild
     isExtended, // 5-6 player extension flag
@@ -879,6 +936,10 @@ export function addPlayer(game, player) {
  * Requires at least 2 players
  */
 export function startGame(game) {
+  if (game.phase !== 'waiting') {
+    return { success: false, error: 'Game already started' };
+  }
+  
   if (game.players.length < 2) {
     return { success: false, error: 'Need at least 2 players' };
   }
@@ -902,6 +963,10 @@ export function startGame(game) {
   game.phase = 'setup';
   game.setupPhase = 0;
   game.currentPlayerIndex = 0;
+  // Server-side record of the current setup turn: the one settlement and one
+  // road the current player owes. Replaces the client-supplied isSetup /
+  // lastSettlement arguments, which let any client claim free pieces.
+  game.setupTurn = { settlement: null, road: null };
   
   return { success: true, turnOrder: game.players.map(p => ({ id: p.id, name: p.name, turnOrder: p.turnOrder })) };
 }
@@ -957,6 +1022,12 @@ export function shuffleBoard(game) {
  * - Other numbers distribute resources to players with adjacent buildings
  */
 export function rollDice(game, playerId) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  if (game.phase !== 'playing') {
+    return { success: false, error: 'Complete setup first' };
+  }
+  
   const player = game.players[game.currentPlayerIndex];
   
   if (player.id !== playerId) {
@@ -1057,9 +1128,16 @@ function distributeResources(game, roll) {
  * Players with more than 7 cards must discard half (rounded down)
  */
 export function discardCards(game, playerId, resources) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) {
     return { success: false, error: 'Player not found' };
+  }
+  
+  if (game.turnPhase !== 'discard') {
+    return { success: false, error: 'No discard in progress' };
   }
   
   const discardInfo = game.discardingPlayers.find(d => d.playerIndex === playerIndex);
@@ -1067,7 +1145,10 @@ export function discardCards(game, playerId, resources) {
     return { success: false, error: 'You do not need to discard' };
   }
   
-  const totalToDiscard = Object.values(resources).reduce((a, b) => a + b, 0);
+  const invalid = validateResourceMap(resources);
+  if (invalid) return { success: false, error: invalid };
+  
+  const totalToDiscard = sumResources(resources);
   if (totalToDiscard !== discardInfo.cardsToDiscard) {
     return { success: false, error: `Must discard exactly ${discardInfo.cardsToDiscard} cards` };
   }
@@ -1105,6 +1186,9 @@ export function discardCards(game, playerId, resources) {
  * - If 7 was rolled (hasRolledThisTurn=true) → proceed to 'main' phase
  */
 export function moveRobber(game, playerId, hexKey, stealFromPlayerId) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const player = game.players[game.currentPlayerIndex];
   
   if (player.id !== playerId) {
@@ -1123,32 +1207,46 @@ export function moveRobber(game, playerId, hexKey, stealFromPlayerId) {
     return { success: false, error: 'Must move robber to a different hex' };
   }
   
+  // Validate the steal target BEFORE moving the robber so a bad target leaves
+  // the game untouched. The victim must have a settlement/city on the target
+  // hex — the client only offers those players, but the server decides.
+  let victimIndex = -1;
+  if (stealFromPlayerId) {
+    victimIndex = game.players.findIndex(p => p.id === stealFromPlayerId);
+    if (victimIndex === -1 || victimIndex === game.currentPlayerIndex) {
+      return { success: false, error: 'Invalid steal target' };
+    }
+    const onHex = getPlayersOnHex(game, hexKey, game.currentPlayerIndex);
+    if (!onHex.includes(victimIndex)) {
+      return { success: false, error: 'That player has no building on this hex' };
+    }
+  }
+  
   game.robber = hexKey;
   
   let stolenInfo = null;
   
-  // Steal from player if specified
-  if (stealFromPlayerId) {
-    const victimIndex = game.players.findIndex(p => p.id === stealFromPlayerId);
-    if (victimIndex !== -1 && victimIndex !== game.currentPlayerIndex) {
-      const victim = game.players[victimIndex];
-      const availableResources = Object.entries(victim.resources)
-        .filter(([_, amount]) => amount > 0)
-        .map(([resource, _]) => resource);
+  if (victimIndex !== -1) {
+    const victim = game.players[victimIndex];
+    // Steal one random CARD, not one random resource type: a hand of 9 wool
+    // and 1 ore loses the ore 10% of the time, not 50%.
+    const hand = [];
+    for (const [resource, amount] of Object.entries(victim.resources)) {
+      for (let i = 0; i < amount; i++) hand.push(resource);
+    }
+    
+    if (hand.length > 0) {
+      const stolenResource = hand[Math.floor(secureRandom() * hand.length)];
+      victim.resources[stolenResource]--;
+      player.resources[stolenResource]++;
       
-      if (availableResources.length > 0) {
-        const stolenResource = availableResources[Math.floor(secureRandom() * availableResources.length)];
-        victim.resources[stolenResource]--;
-        player.resources[stolenResource]++;
-        
-        stolenInfo = {
-          resource: stolenResource,
-          thief: player.id,
-          thiefName: player.name,
-          victim: victim.id,
-          victimName: victim.name
-        };
-      }
+      stolenInfo = {
+        resource: stolenResource,
+        thief: player.id,
+        thiefName: player.name,
+        victim: victim.id,
+        victimName: victim.name
+      };
     }
   }
   
@@ -1209,7 +1307,21 @@ export function canPlaceSettlement(game, playerId, vKey, isSetup = false) {
 
 /** Place a settlement on a valid vertex */
 export function placeSettlement(game, playerId, vKey) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const isSetup = game.phase === 'setup';
+  
+  // Turn ownership is decided here, not by the client.
+  if (isSetup) {
+    if (!isCurrentPlayer(game, playerId)) return { success: false, error: 'Not your turn' };
+    if (game.setupTurn?.settlement) {
+      return { success: false, error: 'You already placed your settlement — place a road' };
+    }
+  } else if (!canPlayerBuildNow(game, playerId)) {
+    return { success: false, error: 'Cannot build now' };
+  }
+  
   const validation = canPlaceSettlement(game, playerId, vKey, isSetup);
   
   if (!validation.valid) {
@@ -1229,9 +1341,12 @@ export function placeSettlement(game, playerId, vKey) {
   player.settlements--;
   player.victoryPoints++;
   
-  // During second setup phase, give initial resources
-  if (isSetup && game.setupPhase === 1) {
-    giveInitialResources(game, vKey, playerIndex);
+  if (isSetup) {
+    game.setupTurn.settlement = vKey;
+    // During second setup phase, give initial resources
+    if (game.setupPhase === 1) {
+      giveInitialResources(game, vKey, playerIndex);
+    }
   }
   
   checkWinner(game);
@@ -1298,10 +1413,16 @@ function getAdjacentHexesToVertex(q, r, dir) {
  * Rules:
  * - Edge must be unoccupied (checking all equivalent edge keys)
  * - Must connect to own road or building
- * - During setup: must connect to the just-placed settlement
+ * - During setup: must connect to the settlement just placed this setup turn
+ *   (`game.setupTurn.settlement`, recorded server-side)
  * - Must have required resources (except during setup or free roads)
+ *
+ * `isSetup` is derived from `game.phase`; it is no longer an argument.
  */
-export function canPlaceRoad(game, playerId, eKey, isSetup = false, lastSettlement = null) {
+export function canPlaceRoad(game, playerId, eKey) {
+  const isSetup = game.phase === 'setup';
+  const lastSettlement = isSetup ? game.setupTurn?.settlement ?? null : null;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) return { valid: false, error: 'Player not found' };
   
@@ -1329,10 +1450,12 @@ export function canPlaceRoad(game, playerId, eKey, isSetup = false, lastSettleme
   // Check connectivity
   let connected = false;
   
-  if (isSetup && lastSettlement) {
-    // Must connect to the last placed settlement
+  if (isSetup) {
+    if (!lastSettlement) return { valid: false, error: 'Place your settlement first' };
+    // Must connect to the settlement placed this setup turn
     // Use areVerticesEqual to handle equivalent vertex keys (same physical position, different hex reference)
     connected = endVertices.some(vKey => areVerticesEqual(vKey, lastSettlement));
+    if (!connected) return { valid: false, error: 'Road must connect to your new settlement' };
   } else if (game.freeRoads > 0) {
     // Free road from road building card - must connect to own network
     connected = endVertices.some(vKey => {
@@ -1397,9 +1520,29 @@ function getEdgeVertices(q, r, dir) {
   return [];
 }
 
-/** Place a road on a valid edge */
-export function placeRoad(game, playerId, eKey, isSetup = false, lastSettlement = null) {
-  const validation = canPlaceRoad(game, playerId, eKey, isSetup, lastSettlement);
+/**
+ * Place a road on a valid edge.
+ *
+ * Turn ownership is derived from game state:
+ *   - setup:   current player, after their settlement this setup turn; the
+ *              road completes the turn and setup advances automatically
+ *   - playing: own turn in 'main' phase, own Special Building slot, or a free
+ *              road from Road Building (which itself requires own turn)
+ */
+export function placeRoad(game, playerId, eKey) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
+  const isSetup = game.phase === 'setup';
+  
+  if (isSetup) {
+    if (!isCurrentPlayer(game, playerId)) return { success: false, error: 'Not your turn' };
+    if (game.setupTurn?.road) return { success: false, error: 'You already placed your road' };
+  } else if (!canPlayerBuildNow(game, playerId)) {
+    return { success: false, error: 'Cannot build now' };
+  }
+  
+  const validation = canPlaceRoad(game, playerId, eKey);
   
   if (!validation.valid) {
     return { success: false, error: validation.error };
@@ -1411,7 +1554,7 @@ export function placeRoad(game, playerId, eKey, isSetup = false, lastSettlement 
   // Deduct resources if not setup and not free road
   if (!isSetup && game.freeRoads === 0) {
     deductResources(player, BUILDING_COSTS.road);
-  } else if (game.freeRoads > 0) {
+  } else if (!isSetup && game.freeRoads > 0) {
     game.freeRoads--;
   }
   
@@ -1423,11 +1566,20 @@ export function placeRoad(game, playerId, eKey, isSetup = false, lastSettlement 
   // Update longest road
   updateLongestRoad(game);
   
+  // Setup turn complete: settlement + road placed. Hand over to the next player.
+  if (isSetup) {
+    game.setupTurn.road = eKey;
+    advanceSetupInternal(game);
+  }
+  
   return { success: true };
 }
 
 /** Upgrade an existing settlement to a city (costs 3 ore + 2 grain) */
 export function upgradeToCity(game, playerId, vKey) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) {
     return { success: false, error: 'Player not found' };
@@ -1473,6 +1625,9 @@ export function upgradeToCity(game, playerId, vKey) {
  * Card is added to newDevCards - can't be played until next turn
  */
 export function buyDevCard(game, playerId) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) {
     return { success: false, error: 'Player not found' };
@@ -1514,6 +1669,12 @@ export function buyDevCard(game, playerId) {
  * - VP cards are never "played" (just count toward victory)
  */
 export function playDevCard(game, playerId, cardType, params = {}) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  if (game.phase !== 'playing') {
+    return { success: false, error: 'Cannot play cards during setup' };
+  }
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) {
     return { success: false, error: 'Player not found' };
@@ -1521,6 +1682,12 @@ export function playDevCard(game, playerId, cardType, params = {}) {
   
   if (game.currentPlayerIndex !== playerIndex) {
     return { success: false, error: 'Not your turn' };
+  }
+  
+  // Cards are played before the roll (knight) or during the main phase — never
+  // while a discard or robber move is pending, and never mid special build.
+  if (game.turnPhase !== 'roll' && game.turnPhase !== 'main') {
+    return { success: false, error: 'Cannot play a card now' };
   }
   
   // Can only play one dev card per turn
@@ -1534,6 +1701,15 @@ export function playDevCard(game, playerId, cardType, params = {}) {
   const cardIndex = player.developmentCards.indexOf(cardType);
   if (cardIndex === -1) {
     return { success: false, error: 'You do not have this card' };
+  }
+  
+  // Validate card-specific params BEFORE removing the card, so a bad request
+  // never consumes it.
+  if (cardType === DEV_CARDS.VICTORY_POINT) {
+    return { success: false, error: 'Victory point cards cannot be played' };
+  }
+  if (cardType === DEV_CARDS.MONOPOLY && !isResourceKey(params?.resource)) {
+    return { success: false, error: 'Must specify a valid resource' };
   }
   
   // Remove card
@@ -1554,10 +1730,7 @@ export function playDevCard(game, playerId, cardType, params = {}) {
       game.yearOfPlentyPicks = 2;
       break;
       
-    case DEV_CARDS.MONOPOLY:
-      if (!params.resource) {
-        return { success: false, error: 'Must specify a resource' };
-      }
+    case DEV_CARDS.MONOPOLY: {
       // Take all of that resource from other players
       let totalStolen = 0;
       game.players.forEach((p, idx) => {
@@ -1568,9 +1741,7 @@ export function playDevCard(game, playerId, cardType, params = {}) {
       });
       player.resources[params.resource] += totalStolen;
       break;
-      
-    case DEV_CARDS.VICTORY_POINT:
-      return { success: false, error: 'Victory point cards cannot be played' };
+    }
   }
   
   // Mark that a dev card was played this turn
@@ -1581,6 +1752,9 @@ export function playDevCard(game, playerId, cardType, params = {}) {
 
 /** Year of Plenty card effect - pick 2 free resources from the bank */
 export function yearOfPlentyPick(game, playerId, resource) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) {
     return { success: false, error: 'Player not found' };
@@ -1592,6 +1766,10 @@ export function yearOfPlentyPick(game, playerId, resource) {
   
   if (game.yearOfPlentyPicks <= 0) {
     return { success: false, error: 'No year of plenty picks remaining' };
+  }
+  
+  if (!isResourceKey(resource)) {
+    return { success: false, error: `Invalid resource: ${resource}` };
   }
   
   const player = game.players[playerIndex];
@@ -1655,6 +1833,9 @@ export function getTradeRatio(game, playerIndex, resource) {
 
 /** Execute a trade with the bank using port ratios */
 export function bankTrade(game, playerId, giveResource, giveAmount, getResource) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) {
     return { success: false, error: 'Player not found' };
@@ -1666,6 +1847,16 @@ export function bankTrade(game, playerId, giveResource, giveAmount, getResource)
   
   if (game.turnPhase !== 'main') {
     return { success: false, error: 'Cannot trade now' };
+  }
+  
+  if (!isResourceKey(giveResource) || !isResourceKey(getResource)) {
+    return { success: false, error: 'Invalid resource' };
+  }
+  if (giveResource === getResource) {
+    return { success: false, error: 'Cannot trade a resource for itself' };
+  }
+  if (!isNonNegInt(giveAmount)) {
+    return { success: false, error: 'Invalid amount' };
   }
   
   const player = game.players[playerIndex];
@@ -1689,6 +1880,9 @@ export function bankTrade(game, playerId, giveResource, giveAmount, getResource)
 
 /** Propose a trade offer to other players */
 export function proposeTrade(game, playerId, offer, request) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   if (playerIndex === -1) {
     return { success: false, error: 'Player not found' };
@@ -1700,6 +1894,14 @@ export function proposeTrade(game, playerId, offer, request) {
   
   if (game.turnPhase !== 'main') {
     return { success: false, error: 'Cannot trade now' };
+  }
+  
+  const badOffer = validateResourceMap(offer, 'offer');
+  if (badOffer) return { success: false, error: badOffer };
+  const badRequest = validateResourceMap(request, 'request');
+  if (badRequest) return { success: false, error: badRequest };
+  if (sumResources(offer) + sumResources(request) === 0) {
+    return { success: false, error: 'Trade must include at least one resource' };
   }
   
   const player = game.players[playerIndex];
@@ -1723,6 +1925,9 @@ export function proposeTrade(game, playerId, offer, request) {
 
 /** Respond to a trade offer (accept or decline) */
 export function respondToTrade(game, playerId, accept) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   if (!game.tradeOffer) {
     return { success: false, error: 'No trade offer' };
   }
@@ -1739,6 +1944,17 @@ export function respondToTrade(game, playerId, accept) {
   const player = game.players[playerIndex];
   
   if (accept) {
+    const offerer = game.players[game.tradeOffer.from];
+    
+    // The offerer may have spent the offered goods (bank trade, build) since
+    // proposing. Re-check so neither side can go negative.
+    for (const [resource, amount] of Object.entries(game.tradeOffer.offer)) {
+      if (offerer.resources[resource] < amount) {
+        game.tradeOffer = null;
+        return { success: false, error: 'Offer no longer valid' };
+      }
+    }
+    
     // Verify player has requested resources
     for (const [resource, amount] of Object.entries(game.tradeOffer.request)) {
       if (player.resources[resource] < amount) {
@@ -1747,8 +1963,6 @@ export function respondToTrade(game, playerId, accept) {
     }
     
     // Execute trade
-    const offerer = game.players[game.tradeOffer.from];
-    
     for (const [resource, amount] of Object.entries(game.tradeOffer.offer)) {
       offerer.resources[resource] -= amount;
       player.resources[resource] += amount;
@@ -1778,6 +1992,9 @@ export function respondToTrade(game, playerId, accept) {
 
 /** Cancel an active trade offer */
 export function cancelTrade(game, playerId) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   if (!game.tradeOffer) {
     return { success: false, error: 'No trade offer' };
   }
@@ -1803,6 +2020,9 @@ export function cancelTrade(game, playerId) {
  * - Advances to next player
  */
 export function endTurn(game, playerId) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   
   if (game.currentPlayerIndex !== playerIndex) {
@@ -1855,6 +2075,9 @@ export function endTurn(game, playerId) {
  * Advances to next player or ends the phase if all players have gone
  */
 export function endSpecialBuild(game, playerId) {
+  const inactive = assertActive(game);
+  if (inactive) return inactive;
+  
   if (!game.specialBuildingPhase) {
     return { success: false, error: 'Not in special building phase' };
   }
@@ -1911,20 +2134,11 @@ function canPlayerBuildNow(game, playerId) {
 }
 
 /** 
- * Advance the setup phase after a player places their settlement + road
+ * Advance the setup phase after the current player has placed their
+ * settlement + road. Called by placeRoad; not reachable from the client.
  * Setup follows snake order: 1→2→3→4→4→3→2→1 for 4 players
  */
-export function advanceSetup(game, playerId) {
-  const player = game.players[game.currentPlayerIndex];
-  
-  if (player.id !== playerId) {
-    return { success: false, error: 'Not your turn' };
-  }
-  
-  if (game.phase !== 'setup') {
-    return { success: false, error: 'Not in setup phase' };
-  }
-  
+function advanceSetupInternal(game) {
   const numPlayers = game.players.length;
   
   if (game.setupPhase === 0) {
@@ -1946,7 +2160,8 @@ export function advanceSetup(game, playerId) {
     }
   }
   
-  return { success: true };
+  // Fresh ledger for whoever is up next (cleared once setup is over).
+  game.setupTurn = game.phase === 'setup' ? { settlement: null, road: null } : null;
 }
 
 // ============================================================================

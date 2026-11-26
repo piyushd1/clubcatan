@@ -161,10 +161,21 @@ try {
   let ghostErr = null;
   try { await ghost.call('reconnect', { playerId: 'not-a-player' }); } catch (e) { ghostErr = e.message; }
   check('unknown playerId still rejected after restart', !!ghostErr, ghostErr);
-  // A fresh action after restart must succeed (state is live, not just readable).
+  // A fresh action after restart must be judged by live rules (state is live,
+  // not just readable). Bob is never the host, whatever seat he was dealt.
   let bobStart = null;
   try { await B2.call('startGame'); } catch (e) { bobStart = e.message; }
   check('engine rules still enforced after restart', bobStart === 'Only host can start the game', bobStart);
+  // The host also cannot restart a game that is already under way.
+  let aliceStart = null;
+  try { await A2.call('startGame'); } catch (e) { aliceStart = e.message; }
+  check('host cannot restart a started game', aliceStart === 'Game already started', aliceStart);
+  // Out-of-turn setup placement is rejected over the wire (audit hole 2).
+  const live = reA.gameState;
+  const notCurrent = live.players[live.currentPlayerIndex].id === created.playerId ? B2 : A2;
+  let intrude = null;
+  try { await notCurrent.call('placeSettlement', { vertexKey: Object.keys(live.vertices)[0] }); } catch (e) { intrude = e.message; }
+  check('out-of-turn setup placement rejected over the wire', intrude === 'Not your turn', intrude);
   A2.ws.close(); B2.ws.close(); ghost.ws.close();
 
   console.log(`\n${passed} passed, ${failed} failed`);

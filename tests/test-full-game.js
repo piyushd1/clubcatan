@@ -71,7 +71,7 @@ function getValidRoadPositions(game, playerId, lastSettlement) {
 
 function getValidMainGameRoadPositions(game, playerId) {
   return Object.keys(game.edges).filter(eKey => 
-    GameLogic.canPlaceRoad(game, playerId, eKey, false, null).valid
+    GameLogic.canPlaceRoad(game, playerId, eKey).valid
   );
 }
 
@@ -237,7 +237,7 @@ async function runTests() {
     assert(validRoads.length > 0, `${player.name} has valid road spots adjacent to settlement`);
 
     const roadPos = validRoads[Math.floor(Math.random() * validRoads.length)];
-    result = GameLogic.placeRoad(game, player.id, roadPos, true, settlementPos);
+    result = GameLogic.placeRoad(game, player.id, roadPos);
     assert(result.success, `${player.name} placed road`);
     setupData.roads.push({ player: player.name, pos: roadPos });
 
@@ -246,7 +246,6 @@ async function runTests() {
     assert(countPlayerRoads(game, playerIdx) === 1, `${player.name} has 1 road`);
 
     // Advance
-    GameLogic.advanceSetup(game, player.id);
   }
 
   assert(game.setupPhase === 1, 'Setup phase changed to 1 (reverse order)');
@@ -272,7 +271,7 @@ async function runTests() {
     // Place road
     const validRoads = getValidRoadPositions(game, player.id, settlementPos);
     const roadPos = validRoads[Math.floor(Math.random() * validRoads.length)];
-    result = GameLogic.placeRoad(game, player.id, roadPos, true, settlementPos);
+    result = GameLogic.placeRoad(game, player.id, roadPos);
     assert(result.success, `${player.name} placed second road`);
 
     // Verify counts
@@ -281,7 +280,6 @@ async function runTests() {
     assert(player.victoryPoints === 2, `${player.name} has 2 VP`);
 
     // Advance
-    GameLogic.advanceSetup(game, player.id);
   }
 
   assert(game.phase === 'playing', 'Game phase changed to "playing"');
@@ -331,7 +329,7 @@ async function runTests() {
   logInfo(`Valid road positions: ${validMainRoads.length}`);
 
   if (validMainRoads.length > 0) {
-    result = GameLogic.placeRoad(game, currentPlayer.id, validMainRoads[0], false, null);
+    result = GameLogic.placeRoad(game, currentPlayer.id, validMainRoads[0]);
     assert(result.success, 'Built road in main phase');
     assert(countPlayerRoads(game, game.currentPlayerIndex) === roadPosBefore + 1, 'Road count increased');
   }
@@ -469,14 +467,14 @@ async function runTests() {
     // Build 2 free roads
     const validRoads1 = getValidMainGameRoadPositions(game, nextPlayer.id);
     if (validRoads1.length > 0) {
-      result = GameLogic.placeRoad(game, nextPlayer.id, validRoads1[0], false, null);
+      result = GameLogic.placeRoad(game, nextPlayer.id, validRoads1[0]);
       assert(result.success, 'Placed first free road');
       assert(game.freeRoads === 1, 'Free roads decreased to 1');
     }
 
     const validRoads2 = getValidMainGameRoadPositions(game, nextPlayer.id);
     if (validRoads2.length > 0) {
-      result = GameLogic.placeRoad(game, nextPlayer.id, validRoads2[0], false, null);
+      result = GameLogic.placeRoad(game, nextPlayer.id, validRoads2[0]);
       assert(result.success, 'Placed second free road');
       assert(game.freeRoads === 0, 'Free roads decreased to 0');
     }
@@ -711,7 +709,7 @@ async function runTests() {
     const validRoads = getValidMainGameRoadPositions(game, roadBuilder.id);
     if (validRoads.length === 0) break;
     
-    result = GameLogic.placeRoad(game, roadBuilder.id, validRoads[0], false, null);
+    result = GameLogic.placeRoad(game, roadBuilder.id, validRoads[0]);
     if (result.success) roadsBuilt++;
     else break;
   }
@@ -791,31 +789,23 @@ async function runTests() {
   const setupPos1 = Object.keys(testGame.vertices).find(vKey => GameLogic.canPlaceSettlement(testGame, tp1.id, vKey, true).valid);
   GameLogic.placeSettlement(testGame, tp1.id, setupPos1);
   const setupRoad1 = Object.keys(testGame.edges).find(eKey => GameLogic.canPlaceRoad(testGame, tp1.id, eKey, true, setupPos1).valid);
-  GameLogic.placeRoad(testGame, tp1.id, setupRoad1, true, setupPos1);
-  GameLogic.advanceSetup(testGame, tp1.id);
-  
+  GameLogic.placeRoad(testGame, tp1.id, setupRoad1);
   const tp2 = testGame.players[testGame.currentPlayerIndex];
   const setupPos2 = Object.keys(testGame.vertices).find(vKey => GameLogic.canPlaceSettlement(testGame, tp2.id, vKey, true).valid);
   GameLogic.placeSettlement(testGame, tp2.id, setupPos2);
   const setupRoad2 = Object.keys(testGame.edges).find(eKey => GameLogic.canPlaceRoad(testGame, tp2.id, eKey, true, setupPos2).valid);
-  GameLogic.placeRoad(testGame, tp2.id, setupRoad2, true, setupPos2);
-  GameLogic.advanceSetup(testGame, tp2.id);
-  
+  GameLogic.placeRoad(testGame, tp2.id, setupRoad2);
   // Phase 1 - reverse
   const tp2b = testGame.players[testGame.currentPlayerIndex];
   const setupPos3 = Object.keys(testGame.vertices).find(vKey => GameLogic.canPlaceSettlement(testGame, tp2b.id, vKey, true).valid);
   GameLogic.placeSettlement(testGame, tp2b.id, setupPos3);
   const setupRoad3 = Object.keys(testGame.edges).find(eKey => GameLogic.canPlaceRoad(testGame, tp2b.id, eKey, true, setupPos3).valid);
-  GameLogic.placeRoad(testGame, tp2b.id, setupRoad3, true, setupPos3);
-  GameLogic.advanceSetup(testGame, tp2b.id);
-  
+  GameLogic.placeRoad(testGame, tp2b.id, setupRoad3);
   const tp1b = testGame.players[testGame.currentPlayerIndex];
   const setupPos4 = Object.keys(testGame.vertices).find(vKey => GameLogic.canPlaceSettlement(testGame, tp1b.id, vKey, true).valid);
   GameLogic.placeSettlement(testGame, tp1b.id, setupPos4);
   const setupRoad4 = Object.keys(testGame.edges).find(eKey => GameLogic.canPlaceRoad(testGame, tp1b.id, eKey, true, setupPos4).valid);
-  GameLogic.placeRoad(testGame, tp1b.id, setupRoad4, true, setupPos4);
-  GameLogic.advanceSetup(testGame, tp1b.id);
-
+  GameLogic.placeRoad(testGame, tp1b.id, setupRoad4);
   logSubSection('Invalid Actions');
 
   // Now in playing phase, find who's not current player
@@ -839,7 +829,7 @@ async function runTests() {
   }
   
   currentTestPlayer.resources = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
-  result = GameLogic.placeRoad(testGame, currentTestPlayer.id, 'e_0_0_0', false, null);
+  result = GameLogic.placeRoad(testGame, currentTestPlayer.id, 'e_0_0_0');
   assert(!result.success, 'Cannot build without resources');
 
   // Try to trade when not your turn

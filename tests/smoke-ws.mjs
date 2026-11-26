@@ -105,9 +105,18 @@ check('reconnect with known playerId returns gameState', re.gameState?.phase ===
 const badRe = await rejects(C.call('reconnect', { playerId: 'nope' }));
 check('reconnect with unknown playerId rejected', !!badRe, badRe);
 
-// Robustness
+// Robustness. Note: C now holds Alice's seat (reconnect unbound A's socket by
+// design), so host-only actions go through C.
 const unknown = await rejects(A.call('hackTheGibson'));
 check('unknown message type rejected', unknown?.startsWith('Unknown message type'), unknown);
+const staleSeat = await rejects(A.call('startGame'));
+check('superseded socket can no longer act for the player', staleSeat === 'Not in a game', staleSeat);
+const restart = await rejects(C.call('startGame'));
+check('host cannot restart a started game', restart === 'Game already started', restart);
+const live = re.gameState;
+const intruder = live.players[live.currentPlayerIndex].id === created.playerId ? B : C;
+const intrude = await rejects(intruder.call('placeSettlement', { vertexKey: Object.keys(live.vertices)[0] }));
+check('out-of-turn setup placement rejected over the wire', intrude === 'Not your turn', intrude);
 A.ws.send('not json');
 await sleep(200);
 check('garbage JSON tolerated (socket still open)', A.ws.readyState === WebSocket.OPEN);

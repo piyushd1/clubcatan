@@ -650,12 +650,12 @@ function testCoordinateSystem() {
     game.players[p1Index].resources = { brick: 10, lumber: 10, wool: 0, grain: 0, ore: 0 };
     
     // Place road at one key format - edge 0 connects v_0 to v_1
-    const result1 = GameLogic.placeRoad(game, 'p1', 'e_0_0_0', false, null);
+    const result1 = GameLogic.placeRoad(game, 'p1', 'e_0_0_0');
     assert(result1.success, 'First road placement succeeds');
     
     // Try to place road at equivalent edge key - should fail
     const equivalentEdge = 'e_1_-1_3'; // Equivalent to e_0_0_0
-    const result2 = GameLogic.placeRoad(game, 'p1', equivalentEdge, false, null);
+    const result2 = GameLogic.placeRoad(game, 'p1', equivalentEdge);
     
     assert(!result2.success, 'Cannot place road on same physical edge (different key format)');
     log(`  Error message: ${result2.error}`, 'yellow');

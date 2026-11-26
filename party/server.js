@@ -223,6 +223,15 @@ export class ClubCatanServer extends Server {
     }
     return this.game;
   }
+
+  /**
+   * The host is whoever created the room. `hostId` is stable; `players[0]`
+   * is not, because startGame shuffles seat order. Games persisted before
+   * hostId existed fall back to the first seat.
+   */
+  isHost(game, playerId) {
+    return (game.hostId ?? game.players[0]?.id) === playerId;
+  }
 }
 
 // ============================================================================
@@ -322,7 +331,7 @@ const HANDLERS = {
     const playerId = this.requirePlayer(conn, ackId);
     const game = this.requireGame(conn, ackId);
     if (!playerId || !game) return;
-    if (game.players[0].id !== playerId) return this.ack(conn, ackId, false, 'Only host can start the game');
+    if (!this.isHost(game, playerId)) return this.ack(conn, ackId, false, 'Only host can start the game');
     const result = GameLogic.startGame(game);
     if (result.success) {
       this.broadcast({ type: 'gameStarted', turnOrder: result.turnOrder });
@@ -336,7 +345,7 @@ const HANDLERS = {
     const playerId = this.requirePlayer(conn, ackId);
     const game = this.requireGame(conn, ackId);
     if (!playerId || !game) return;
-    if (game.players[0].id !== playerId) return this.ack(conn, ackId, false, 'Only host can shuffle the board');
+    if (!this.isHost(game, playerId)) return this.ack(conn, ackId, false, 'Only host can shuffle the board');
     const result = GameLogic.shuffleBoard(game);
     if (result.success) {
       this.broadcast({ type: 'boardShuffled' });
@@ -431,12 +440,13 @@ const HANDLERS = {
     this.ack(conn, ackId, result.success, result.success ? result : result.error);
   },
 
-  async placeRoad(conn, { edgeKey, isSetup, lastSettlement }, ackId) {
+  async placeRoad(conn, { edgeKey }, ackId) {
     const playerId = this.requirePlayer(conn, ackId);
     const game = this.requireGame(conn, ackId);
     if (!playerId || !game) return;
     const priorLongestRoad = game.longestRoadPlayer;
-    const result = GameLogic.placeRoad(game, playerId, edgeKey, isSetup, lastSettlement);
+    // Setup vs. main-game placement is derived from game.phase on the server.
+    const result = GameLogic.placeRoad(game, playerId, edgeKey);
     if (result.success) {
       this.broadcast({ type: 'roadPlaced', edgeKey, playerId });
       this.maybeBroadcastAchievement('longestRoad', priorLongestRoad, game.longestRoadPlayer);
@@ -563,18 +573,8 @@ const HANDLERS = {
   // --------------------------------------------------------------------------
   // TURN MANAGEMENT
   // --------------------------------------------------------------------------
-
-  async advanceSetup(conn, _payload, ackId) {
-    const playerId = this.requirePlayer(conn, ackId);
-    const game = this.requireGame(conn, ackId);
-    if (!playerId || !game) return;
-    const result = GameLogic.advanceSetup(game, playerId);
-    if (result.success) {
-      await this.persist();
-      this.broadcastGameState();
-    }
-    this.ack(conn, ackId, result.success, result.success ? result : result.error);
-  },
+  // (Setup turns advance automatically inside GameLogic.placeRoad; there is no
+  // client-callable advanceSetup any more.)
 
   async endTurn(conn, _payload, ackId) {
     const playerId = this.requirePlayer(conn, ackId);
