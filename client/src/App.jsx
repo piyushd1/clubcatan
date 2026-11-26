@@ -16,7 +16,6 @@ import {
   upsertRecentRoom,
   clearActiveGame,
 } from './lib/cache';
-import './App.css';
 
 const SESSION_KEY = 'clubcatan:session';
 

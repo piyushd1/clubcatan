@@ -14,32 +14,18 @@ const initial = {
   game: null,
   lastRoll: null,
   chatMessages: [],
-  incomingTrade: null,
-  tradeOffers: [],
   pendingSteal: null,
-  draftTrade: { give: {}, want: {} },
-  selection: null,
   notifications: [],
 };
 
 const asDraft = (recipe) => (state) => mutate(state, recipe);
 
-export const useGameStore = create((set, get) => ({
+export const useGameStore = create((set) => ({
   ...initial,
 
   reset: () => set(() => ({ ...initial })),
 
   setGame: (snapshot) => set(asDraft((d) => { d.game = snapshot; })),
-
-  setSelection: (selection) => set(asDraft((d) => { d.selection = selection; })),
-
-  setDraftTrade: (next) => set(asDraft((d) => {
-    d.draftTrade = typeof next === 'function' ? next(d.draftTrade) : next;
-  })),
-
-  clearDraftTrade: () => set(asDraft((d) => {
-    d.draftTrade = { give: {}, want: {} };
-  })),
 
   pushNotification: (message) => {
     const id = Date.now() + Math.random();
@@ -52,8 +38,6 @@ export const useGameStore = create((set, get) => ({
       }));
     }, 4000);
   },
-
-  dismissIncomingTrade: () => set(asDraft((d) => { d.incomingTrade = null; })),
 
   clearPendingSteal: () => set(asDraft((d) => { d.pendingSteal = null; })),
 
@@ -109,20 +93,13 @@ export const useGameStore = create((set, get) => ({
         d.pendingSteal = { variant: msg.variant, resource: msg.resource, otherPlayer: msg.otherPlayer };
         return;
 
-      case 'tradeProposed':
-        d.incomingTrade = { from: msg.from, offer: msg.offer, request: msg.request };
-        return;
-
-      case 'tradeCancelled':
-        d.incomingTrade = null;
-        return;
-
       case 'chatMessage':
         d.chatMessages.push(msg);
         if (d.chatMessages.length > 200) d.chatMessages.splice(0, d.chatMessages.length - 200);
         return;
 
       // Events handled purely via the gameState tick that accompanies them.
+      // Trade events included: the Board reads `game.tradeOffer` directly.
       case 'playerJoined':
       case 'playerDisconnected':
       case 'playerReconnected':
@@ -132,6 +109,10 @@ export const useGameStore = create((set, get) => ({
       case 'roadPlaced':
       case 'cityBuilt':
       case 'devCardPlayed':
+      case 'tradeProposed':
+      case 'tradeAccepted':
+      case 'tradeDeclined':
+      case 'tradeCancelled':
       case 'specialBuildingPhaseStarted':
       case 'specialBuildingPhaseEnded':
       case 'specialBuildNext':
@@ -149,11 +130,3 @@ export const useGameStore = create((set, get) => ({
     }
   })),
 }));
-
-/** Selector helpers — co-located so components don't drift into their own copies. */
-export const selectGame = (s) => s.game;
-export const selectPlayers = (s) => s.game?.players ?? [];
-export const selectMe = (playerId) => (s) => s.game?.players?.find((p) => p.id === playerId) ?? null;
-export const selectPhase = (s) => s.game?.phase ?? null;
-export const selectCurrentTurn = (s) => s.game?.currentPlayerIndex ?? null;
-export const selectHexes = (s) => s.game?.board?.hexes ?? [];
