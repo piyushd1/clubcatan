@@ -12,6 +12,7 @@
     "test:client": "node client/test-room-code.js && node client/test-hex-math.js",
     "test:logic": "node tests/test-game.js && node tests/test-edge-cases.js && node tests/test-full-game.js && node tests/test-longest-road-rigorous.js && node tests/test-special-build.js",
     "test:smoke": "node tests/smoke-ws.mjs",
+    "test:restart": "npm run build && node tests/smoke-restart.mjs",
     "test": "npm run test:client && npm run test:logic"
   },
   "dependencies": {
