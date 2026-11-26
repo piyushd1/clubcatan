@@ -1,17 +1,16 @@
 name: Deploy
 
-# Only runs after a merge into main. Builds again + runs tests again before
-# pushing to PartyKit — belt-and-suspenders with CI since this is the last
-# gate before live traffic.
+# Runs only on pushes to main. Repeats the CI checks, then deploys the Worker
+# (server + static client) to Cloudflare with wrangler. Every merge to main is
+# a production deploy to https://catan.piyushdev.com.
 on:
   push:
     branches: [main]
 
-# Prevent overlapping deploys if multiple merges land in quick succession:
-# the newer one waits for the older one to finish, the cancelled-in-progress
-# flag keeps only the latest commit in the queue.
+# Serialise deploys so two quick merges can't race each other. The newer run
+# waits for the older one; nothing is cancelled mid-deploy.
 concurrency:
-  group: partykit-deploy
+  group: cloudflare-deploy
   cancel-in-progress: false
 
 jobs:
@@ -22,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -37,17 +36,17 @@ jobs:
       - name: Build client bundle
         run: npm run build
 
-      - name: Run gameLogic tests
-        run: npm run test:logic
+      - name: Run tests (client + game logic)
+        run: npm test
 
-      - name: Deploy to PartyKit
-        env:
-          # Non-interactive auth for the PartyKit CLI. Both are required:
-          #   PARTYKIT_LOGIN  — your PartyKit username (the subdomain segment,
-          #                     e.g. `piyushd1` in clubcatan.piyushd1.partykit.dev).
-          #   PARTYKIT_TOKEN  — the long token from `npx partykit token generate`.
-          # Omitting either makes the CLI fall back to an interactive OAuth
-          # flow, which hangs forever on CI.
-          PARTYKIT_LOGIN: ${{ secrets.PARTYKIT_LOGIN }}
-          PARTYKIT_TOKEN: ${{ secrets.PARTYKIT_TOKEN }}
-        run: npx partykit deploy
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          # Repo secrets (Settings → Secrets and variables → Actions):
+          #   CLOUDFLARE_API_TOKEN  — "Edit Cloudflare Workers" template plus
+          #                           Zone → DNS → Edit on piyushdev.com (the
+          #                           custom-domain record is created on first deploy).
+          #   CLOUDFLARE_ACCOUNT_ID — from the Workers & Pages overview page.
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy

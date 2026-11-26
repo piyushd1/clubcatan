@@ -2,7 +2,11 @@
 
 A mobile-first, installable PWA of the classic Settlers of Catan board game. Built for a friend group — no accounts, no monetization, just a share link and a phone.
 
-**Live:** [clubcatan.piyushd1.partykit.dev](https://clubcatan.piyushd1.partykit.dev)
+**Live:** [catan.piyushdev.com](https://catan.piyushdev.com)
+
+> The hosted PartyKit platform shut down in October 2026. ClubCatan now runs on
+> Cloudflare Workers (PartyServer) and deploys with `wrangler` on every push to
+> `main`. The rest of this README is being updated to match.
 
 ## How to play
 

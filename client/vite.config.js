@@ -47,6 +47,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: true,
+    // Loopback by default. To reach HMR from a phone on your Wi-Fi, opt in
+    // explicitly: `npm run dev:client -- --host` (binds all interfaces).
+    host: '127.0.0.1',
   },
 })
