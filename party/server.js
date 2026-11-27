@@ -27,6 +27,7 @@
 
 import { Server, routePartykitRequest } from 'partyserver';
 import * as GameLogic from '../shared/gameLogic.js';
+import { validate } from './validate.js';
 
 export class ClubCatanServer extends Server {
   // Let the Durable Object hibernate between messages. Idle rooms cost nothing
@@ -104,11 +105,14 @@ export class ClubCatanServer extends Server {
     } catch {
       return this.sendTo(sender, { type: 'error', message: 'Invalid JSON' });
     }
-    const { type, ackId, payload = {} } = msg || {};
+    const { type, ackId, payload } = msg || {};
     const handler = HANDLERS[type];
     if (!handler) return this.ack(sender, ackId, false, `Unknown message type: ${type}`);
+    // Shape-check and sanitise the payload before any game code sees it.
+    const checked = validate(type, payload);
+    if (!checked.ok) return this.ack(sender, ackId, false, checked.error);
     try {
-      await handler.call(this, sender, payload, ackId);
+      await handler.call(this, sender, checked.payload, ackId);
     } catch (err) {
       console.error(`[clubcatan] handler ${type} threw`, err);
       this.ack(sender, ackId, false, err?.message || 'Internal error');

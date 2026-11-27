@@ -117,6 +117,20 @@ const live = re.gameState;
 const intruder = live.players[live.currentPlayerIndex].id === created.playerId ? B : C;
 const intrude = await rejects(intruder.call('placeSettlement', { vertexKey: Object.keys(live.vertices)[0] }));
 check('out-of-turn setup placement rejected over the wire', intrude === 'Not your turn', intrude);
+// Boundary validation (party/validate.js) — malformed payloads are rejected
+// before the engine sees them, and the game state is unchanged afterwards.
+const stateBefore = JSON.stringify((await C.call('reconnect', { playerId: created.playerId })).gameState);
+const mal = {
+  'negative discard': await rejects(C.call('discardCards', { resources: { brick: -1 } })),
+  'bogus resource key': await rejects(C.call('yearOfPlentyPick', { resource: 'gold' })),
+  '5 KB name': await rejects(B.call('joinGame', { playerName: 'x'.repeat(5000) })),
+  'malformed vertex key': await rejects(C.call('placeSettlement', { vertexKey: 'v_0_0_9' })),
+  'string accept': await rejects(B.call('respondToTrade', { accept: 'yes' })),
+};
+for (const [label, err] of Object.entries(mal)) check(`${label} rejected`, !!err, err);
+const stateAfter = JSON.stringify((await C.call('reconnect', { playerId: created.playerId })).gameState);
+check('game state unchanged after malformed payloads', stateBefore === stateAfter);
+
 A.ws.send('not json');
 await sleep(200);
 check('garbage JSON tolerated (socket still open)', A.ws.readyState === WebSocket.OPEN);

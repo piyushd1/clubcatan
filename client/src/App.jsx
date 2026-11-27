@@ -58,6 +58,12 @@ function App() {
   const { client, status } = useRoom(session?.roomCode);
   const clientRef = useRef(null);
   useEffect(() => { clientRef.current = client; }, [client]);
+  // Dev-only escape hatch for poking the protocol from DevTools:
+  //   __cc.call('placeRoad', { edgeKey: 'e_0_0_0' })
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__cc = client ?? undefined;
+  }, [client]);
   const game = useGameStore((s) => s.game);
   const setGame = useGameStore((s) => s.setGame);
   const notifications = useGameStore((s) => s.notifications);
