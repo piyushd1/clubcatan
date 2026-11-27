@@ -20,7 +20,7 @@ const initial = {
 
 const asDraft = (recipe) => (state) => mutate(state, recipe);
 
-export const useGameStore = create((set) => ({
+export const useGameStore = create((set, get) => ({
   ...initial,
 
   reset: () => set(() => ({ ...initial })),
@@ -45,88 +45,94 @@ export const useGameStore = create((set) => ({
    * Single entry point for every server message. Keep the switch exhaustive so
    * new server events show up as "unknown message type" warnings, not silent drops.
    */
-  applyServerMessage: (msg) => set(asDraft((d) => {
-    switch (msg.type) {
-      case 'gameState':
-        d.game = msg.state;
-        return;
-
-      case 'achievementChanged': {
-        // Broadcast when longest road / largest army changes hands. Renders
-        // as a self-dismissing toast so every player knows the VP shift.
-        const kindLabel = msg.kind === 'longestRoad' ? 'Longest Road' : 'Largest Army';
-        const newName = d.game?.players?.find((p) => p.id === msg.newHolderId)?.name;
-        const prevName = d.game?.players?.find((p) => p.id === msg.previousHolderId)?.name;
-        let message;
-        if (newName && prevName) message = `${newName} took ${kindLabel} from ${prevName}`;
-        else if (newName) message = `${newName} claims ${kindLabel}`;
-        else if (prevName) message = `${prevName} lost ${kindLabel}`;
-        else message = `${kindLabel} is contested`;
-        const id = Date.now() + Math.random();
-        d.notifications.push({ id, message });
-        // Self-cleanup — the 4-second window matches pushNotification's default.
-        setTimeout(() => {
-          useGameStore.setState((s) =>
-            mutate(s, (dd) => { dd.notifications = dd.notifications.filter((n) => n.id !== id); })
-          );
-        }, 4000);
-        return;
-      }
-
-      case 'diceRolled':
-        d.lastRoll = { total: msg.roll?.total ?? null, dice: msg.roll?.dice ?? null, playerId: msg.playerId };
-        return;
-
-      case 'resourcesDistributed':
-        // Bookkeeping only; the authoritative totals land in the next gameState.
-        return;
-
-      case 'resourcesReceived':
-        // Personal notification — the gameState tick will carry the exact counts.
-        return;
-
-      case 'robberMoved':
-        // Handled via gameState tick.
-        return;
-
-      case 'stealResult':
-        d.pendingSteal = { variant: msg.variant, resource: msg.resource, otherPlayer: msg.otherPlayer };
-        return;
-
-      case 'chatMessage':
-        d.chatMessages.push(msg);
-        if (d.chatMessages.length > 200) d.chatMessages.splice(0, d.chatMessages.length - 200);
-        return;
-
-      // Events handled purely via the gameState tick that accompanies them.
-      // Trade events included: the Board reads `game.tradeOffer` directly.
-      case 'playerJoined':
-      case 'playerDisconnected':
-      case 'playerReconnected':
-      case 'gameStarted':
-      case 'boardShuffled':
-      case 'settlementPlaced':
-      case 'roadPlaced':
-      case 'cityBuilt':
-      case 'devCardPlayed':
-      case 'tradeProposed':
-      case 'tradeAccepted':
-      case 'tradeDeclined':
-      case 'tradeCancelled':
-      case 'specialBuildingPhaseStarted':
-      case 'specialBuildingPhaseEnded':
-      case 'specialBuildNext':
-      case 'turnEnded':
-        return;
-
-      case 'error':
-        d.notifications.push({ id: Date.now() + Math.random(), message: msg.message || 'Unknown error' });
-        return;
-
-      default:
-        if (import.meta.env.DEV) {
-          console.warn('[gameStore] unhandled server message type:', msg.type, msg);
-        }
+  applyServerMessage: (msg) => {
+    // Toasts are side effects (they schedule their own removal), so they go
+    // through pushNotification after the state update rather than inside it.
+    if (msg.type === 'achievementChanged') {
+      get().pushNotification(achievementMessage(get().game, msg));
+      return;
     }
-  })),
+    if (msg.type === 'error') {
+      get().pushNotification(msg.message || 'Unknown error');
+      return;
+    }
+    set(asDraft((d) => {
+      switch (msg.type) {
+        case 'gameState':
+          d.game = msg.state;
+          return;
+        case 'diceRolled':
+          // Server sends { roll: { die1, die2, total }, playerId }.
+          d.lastRoll = {
+            total: msg.roll?.total ?? null,
+            die1: msg.roll?.die1 ?? null,
+            die2: msg.roll?.die2 ?? null,
+            playerId: msg.playerId,
+          };
+          return;
+
+        case 'resourcesDistributed':
+          // Bookkeeping only; the authoritative totals land in the next gameState.
+          return;
+
+        case 'resourcesReceived':
+          // Personal notification — the gameState tick will carry the exact counts.
+          return;
+
+        case 'robberMoved':
+          // Handled via gameState tick.
+          return;
+
+        case 'stealResult':
+          d.pendingSteal = { variant: msg.variant, resource: msg.resource, otherPlayer: msg.otherPlayer };
+          return;
+
+        case 'chatMessage':
+          d.chatMessages.push(msg);
+          if (d.chatMessages.length > 200) d.chatMessages.splice(0, d.chatMessages.length - 200);
+          return;
+
+        // Events handled purely via the gameState tick that accompanies them.
+        // Trade events included: the Board reads `game.tradeOffer` directly.
+        case 'playerJoined':
+        case 'playerDisconnected':
+        case 'playerReconnected':
+        case 'gameStarted':
+        case 'boardShuffled':
+        case 'settlementPlaced':
+        case 'roadPlaced':
+        case 'cityBuilt':
+        case 'devCardPlayed':
+        case 'tradeProposed':
+        case 'tradeAccepted':
+        case 'tradeDeclined':
+        case 'tradeCancelled':
+        case 'specialBuildingPhaseStarted':
+        case 'specialBuildingPhaseEnded':
+        case 'specialBuildNext':
+        case 'turnEnded':
+          return;
+
+        default:
+          if (import.meta.env.DEV) {
+            console.warn('[gameStore] unhandled server message type:', msg.type, msg);
+          }
+      }
+    }));
+  },
 }));
+
+/**
+ * Toast text for a longest-road / largest-army handoff. Pure, so it can be
+ * unit-tested; `game` may be null before the first snapshot.
+ */
+export function achievementMessage(game, msg) {
+  const kindLabel = msg.kind === 'longestRoad' ? 'Longest Road' : 'Largest Army';
+  const nameOf = (id) => game?.players?.find((p) => p.id === id)?.name;
+  const newName = nameOf(msg.newHolderId);
+  const prevName = nameOf(msg.previousHolderId);
+  if (newName && prevName) return `${newName} took ${kindLabel} from ${prevName}`;
+  if (newName) return `${newName} claims ${kindLabel}`;
+  if (prevName) return `${prevName} lost ${kindLabel}`;
+  return `${kindLabel} is contested`;
+}

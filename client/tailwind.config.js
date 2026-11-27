@@ -34,11 +34,15 @@ export default {
           DEFAULT: '#74796f',
           variant: '#c4c8bd',
         },
+        // Six seat colours; keep in sync with FACTION_COLORS in
+        // components/board/HexBoard.jsx and components/ui/PlayerAvatar.jsx.
         faction: {
           red: '#9c4323',
           blue: '#3b5f7a',
-          green: '#154212',
           gold: '#a48a2e',
+          green: '#154212',
+          purple: '#6b3b7a',
+          teal: '#2f7a73',
         },
       },
       fontFamily: {

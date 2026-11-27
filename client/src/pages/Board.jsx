@@ -6,6 +6,7 @@ import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
 import { TerrainHexBadge } from '../components/board/TerrainSymbol';
 import { isVertexOnEdge } from '../lib/hex-math';
+import { factionBgForSeat, factionForSeat, findWinner, shouldShowTradeDialog } from '../lib/game-ui';
 
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
 const RESOURCE_TINTS = {
@@ -32,7 +33,6 @@ const RESOURCE_SHORT = {
   grain: 'Hay',
   ore: 'Ore',
 };
-const FACTIONS = ['red', 'blue', 'gold', 'green'];
 
 export function Board({ roomCode, playerId, client, onLeave, spectator = false }) {
   const game = useGameStore((s) => s.game);
@@ -311,7 +311,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
     await doMoveRobber(hexKey, playerIdOrNull);
   };
 
-  const winner = phase === 'finished' ? players[game?.winner] : null;
+  const winner = phase === 'finished' ? findWinner(players, game?.winner) : null;
 
   return (
     <main className="relative min-h-dvh bg-surface pb-[calc(88px+env(safe-area-inset-bottom))]" style={{ touchAction: 'pan-y' }}>
@@ -403,7 +403,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
         />
       ) : null}
 
-      {game?.tradeOffer && game.tradeOffer.from !== myIndex ? (
+      {shouldShowTradeDialog(game?.tradeOffer, myIndex, playerId) ? (
         <IncomingTradeModal
           offer={game.tradeOffer}
           from={players[game.tradeOffer.from]}
@@ -1451,7 +1451,7 @@ function ResourcePickerModal({ title, body, onPick, onCancel }) {
 
 function StatusPanel({ game, me, playerId, currentIndex, onClose }) {
   const players = game?.players ?? [];
-  const winner = game?.winner != null ? players[game.winner] : null;
+  const winner = findWinner(players, game?.winner);
   const victoryTarget = game?.victoryPointsToWin ?? 10;
 
   // Public VP is authoritative during the game. Hidden VP dev cards only
@@ -1516,13 +1516,7 @@ function StatusPanel({ game, me, playerId, currentIndex, onClose }) {
 
 function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
   const vp = player.victoryPoints ?? 0;
-  const faction = FACTIONS[player.seat ?? 0] ?? 'red';
-  const factionClass = {
-    red: 'bg-faction-red',
-    blue: 'bg-faction-blue',
-    gold: 'bg-faction-gold',
-    green: 'bg-faction-green',
-  }[faction] ?? 'bg-outline';
+  const factionClass = factionBgForSeat(player.seat);
 
   // Resource / dev-card counts differ in shape between self (object/array)
   // and opponents (number). Normalize to a number for display.
@@ -1550,7 +1544,7 @@ function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
         isCurrent ? 'bg-surface-highest shadow-ambient' : 'bg-surface-low',
       ].join(' ')}
     >
-      <FactionStripe faction={faction} />
+      <FactionStripe faction={factionForSeat(player.seat)} />
       <div className="flex items-start gap-3">
         <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-extrabold text-on-primary ${factionClass}`}>
           {rank + 1}
@@ -1696,7 +1690,7 @@ function GameOverOverlay({ winner, players, myPlayerId, onLeave }) {
             <div key={p.id} className="flex items-center justify-between rounded-md bg-surface-low px-3 py-2">
               <span className="flex items-center gap-3">
                 <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-on-primary ${
-                  ['bg-faction-red','bg-faction-blue','bg-faction-gold','bg-faction-green'][i] ?? 'bg-outline'
+                  factionBgForSeat(i)
                 }`}>
                   {i + 1}
                 </span>
