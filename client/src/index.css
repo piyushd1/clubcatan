@@ -27,67 +27,6 @@
   }
 }
 
-/*
- * Legacy styles for the pre-redesign screens (Lobby.jsx, GameBoard.jsx, modals).
- * These will be removed in Phase 1.9 when the screens are rebuilt to match
- * `images-inspiration/wilderbound/DESIGN.md`. Kept for now so the dev server
- * renders something recognizable during migration.
- */
-:root {
-  --legacy-bg-primary: #1a1612;
-  --legacy-bg-secondary: #2a2420;
-  --legacy-bg-tertiary: #3a3430;
-  --legacy-text-primary: #f4e4c8;
-  --legacy-text-secondary: #c9b896;
-  --legacy-text-muted: #8a7a64;
-  --legacy-accent-gold: #d4a942;
-  --legacy-accent-copper: #c45a2c;
-  --legacy-accent-green: #4a8b3c;
-  --legacy-accent-blue: #4a7bb5;
-  --legacy-border-color: #5a4a3a;
-
-  --bg-primary: var(--legacy-bg-primary);
-  --bg-secondary: var(--legacy-bg-secondary);
-  --bg-tertiary: var(--legacy-bg-tertiary);
-  --text-primary: var(--legacy-text-primary);
-  --text-secondary: var(--legacy-text-secondary);
-  --text-muted: var(--legacy-text-muted);
-  --accent-gold: var(--legacy-accent-gold);
-  --accent-copper: var(--legacy-accent-copper);
-  --accent-green: var(--legacy-accent-green);
-  --accent-blue: var(--legacy-accent-blue);
-  --border-color: var(--legacy-border-color);
-
-  --brick: #c45a2c;
-  --lumber: #2d5a27;
-  --wool: #90c26a;
-  --grain: #d4a942;
-  --ore: #6b6b6b;
-  --desert: #e8d5a3;
-
-  --player-red: #e63946;
-  --player-blue: #457b9d;
-  --player-orange: #f4a261;
-  --player-teal: #2a9d8f;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.05); }
-}
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 5px var(--accent-gold); }
-  50% { box-shadow: 0 0 20px var(--accent-gold), 0 0 30px var(--accent-gold); }
-}
-
-.fade-in { animation: fadeIn 0.3s ease-out; }
-.pulse { animation: pulse 2s ease-in-out infinite; }
-.glow { animation: glow 2s ease-in-out infinite; }
-
 /* Hide scrollbars on horizontally-scrolling rows (ResourceHUD, etc.) — pure
    aesthetic; scrolling still works via touch + keyboard. */
 .no-scrollbar::-webkit-scrollbar { display: none; }

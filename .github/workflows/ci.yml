@@ -1,7 +1,8 @@
 name: CI
 
-# Runs on every push (including debug) and every pull request.
-# Keeps PR merges blocked until the check is green.
+# Runs on every push and every pull request. Builds the client, runs both test
+# suites, and dry-runs the Worker bundle so a broken wrangler.jsonc fails here
+# instead of in the deploy job.
 on:
   push:
     branches: ['**']
@@ -15,14 +16,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          # Cache npm for both package.json files. Keys off the two lockfiles.
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
             client/package-lock.json
 
-      - name: Install root deps (partykit CLI)
+      - name: Install root deps (partyserver, wrangler)
         run: npm ci
 
       - name: Install client deps
@@ -31,5 +31,8 @@ jobs:
       - name: Build client bundle
         run: npm run build
 
-      - name: Run gameLogic tests
-        run: npm run test:logic
+      - name: Run tests (client + game logic)
+        run: npm test
+
+      - name: Validate Worker config and bundle (dry run)
+        run: npm run check:wrangler

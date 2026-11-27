@@ -2,7 +2,7 @@
 
 A mobile-first, installable PWA of the classic Settlers of Catan board game. Built for a friend group — no accounts, no monetization, just a share link and a phone.
 
-**Live:** [clubcatan.piyushd1.partykit.dev](https://clubcatan.piyushd1.partykit.dev)
+**Live:** [catan.piyushdev.com](https://catan.piyushdev.com)
 
 ## How to play
 
@@ -18,6 +18,8 @@ Already-started games let late arrivals **spectate** — up to four people can w
 
 - **Complete Catan ruleset** — setup phase, resource distribution, robber + discard, 4:1 / 3:1 / 2:1 port trades, player-to-player trades, all five development cards, longest road, largest army, win at 10 VP
 - **5-6 player extended board** — optional, with the Special Building Phase when enabled
+- **Server-authoritative** — turn order, phase, resource counts and every placement are validated on the server; the client is a view
+- **Games survive restarts** — state lives in Durable Object storage, so a deploy, an idle eviction or a phone reboot never loses a game. Rooms idle for 7 days are recycled
 - **Mobile-first UI** — designed for one-handed portrait play on a phone, with a glassmorphic HUD and tap-friendly hit targets
 - **Installable PWA** — Android Chromium shows an install prompt; iOS Safari gets a Share-sheet hint. Launches standalone, works offline for the app shell
 - **Fast reconnect** — session + game snapshot cached to IndexedDB, so a reload rehydrates the board instantly while the WebSocket catches up
@@ -29,73 +31,55 @@ Already-started games let late arrivals **spectate** — up to four people can w
 |---|---|
 | UI | Preact via `preact/compat` alias, Vite, Tailwind CSS |
 | State | Zustand + `mutative` for identity-preserving reducers; `idb` for IndexedDB |
-| Realtime | PartyKit (Cloudflare Durable Objects) + `partysocket` |
+| Realtime | [PartyServer](https://github.com/cloudflare/partykit) on Cloudflare Workers + Durable Objects, `partysocket` on the client |
 | PWA | `vite-plugin-pwa` + Workbox |
 | Fonts / icons | `@fontsource-variable/manrope`, inline-SVG icon set |
 
-Both client and server ship from a **single unified PartyKit deploy** — the Vite-built client lives under `client/dist/` and PartyKit's `serve` directive hands it out of the same edge that runs the realtime server.
+Client and server ship as **one Cloudflare Worker**: the Vite-built client in `client/dist/` is served as static assets, and `/parties/main/<ROOM>` routes to the room's Durable Object. One `wrangler deploy`, one domain.
 
 ## Repo layout
 
 ```
-party/          PartyKit server — Durable-Object per room, JSON-envelope
-                protocol. gameLogic.js is the engine, server.js wires it
-                to WebSocket events.
-client/         Preact + Vite app. src/pages for screens, src/components
-                for primitives, src/lib for the partykit client + IndexedDB
-                cache + hex math.
-partykit.json   Unified deploy config (static assets + server in one).
-.github/        CI + auto-deploy workflows.
+party/          Cloudflare Worker. server.js is the room (one Durable Object
+                per game, JSON-envelope protocol over WebSocket); validate.js
+                checks every payload before the engine sees it.
+shared/         gameLogic.js — the rules engine. Pure functions, no I/O.
+client/         Preact + Vite PWA. src/pages for screens, src/components for
+                primitives, src/lib for the socket client, IndexedDB cache,
+                hex math and UI helpers.
+tests/          Engine suites (rules, edge cases, longest road, special build,
+                server authority, payload validation) plus two live
+                WebSocket smoke tests.
+wrangler.jsonc  Worker config: Durable Object binding, static assets, domain.
+.github/        CI on every branch; deploy to Cloudflare on push to main.
+docs/           Design doc, audit, and the Phase 0 plan.
 ```
 
 ## Local development
 
 ```bash
-# One-time
-npm install
-npm --prefix client install
-
-# Terminal 1: PartyKit server (serves WS + static on :1999)
-npm run build
-npm run dev:party
-
-# OR, for live client HMR:
-# Terminal 1: Vite on :5173
-# Terminal 2: `npx partykit dev` on :1999
-# (Client connects to :1999 for WS while Vite serves the frontend.)
+npm ci
+npm ci --prefix client
+npm run dev          # builds the client, then `wrangler dev` on http://127.0.0.1:8787
 ```
 
-Open `http://localhost:1999` (or `:5173` with HMR) in your browser. Two tabs → two players.
+Open `http://127.0.0.1:8787` in two tabs → two players. To test from a phone on the same Wi-Fi, run `npx wrangler dev --ip 0.0.0.0` instead and open your laptop's LAN IP on port 8787.
+
+For client hot-reload, run `npm run dev:client` (Vite on :5173) alongside `npx wrangler dev` (:8787); the client points its WebSocket at :8787 automatically when served from :5173.
 
 ### Running tests
 
 ```bash
-npm run test:logic
+npm test             # unit: client helpers + all engine suites (~550 assertions, a few seconds)
+npm run test:smoke   # two real WebSocket clients against a running `npm run dev`
+npm run test:restart # starts wrangler dev, plays a game, kills and restarts it, checks the game survived
 ```
-
-Runs the four `party/test-*.js` suites — pure game-logic checks (setup, turn flow, edge cases, longest-road algorithm). Server-independent.
 
 ## Deploy
 
-```bash
-npx partykit deploy
-```
+Pushing to `main` deploys to production. `.github/workflows/deploy.yml` builds, runs the unit suites, then runs `wrangler deploy` with two repo secrets: `CLOUDFLARE_API_TOKEN` (Workers edit + DNS edit on the zone) and `CLOUDFLARE_ACCOUNT_ID`. `ci.yml` runs the same build and tests on every branch and PR, plus a `wrangler deploy --dry-run` so a broken config fails before it reaches `main`.
 
-Requires a `partykit login` first. The client is built automatically via the `deploy` npm script. Ships to `clubcatan.<your-user>.partykit.dev` by default.
-
-## CI/CD
-
-GitHub Actions handle the pipeline:
-
-- **`ci.yml`** — runs on every push and PR. Installs deps, builds the client, runs `npm run test:logic`. PR merge stays locked until green.
-- **`deploy.yml`** — runs only on pushes to `main`. Same checks, then `partykit deploy` using a `PARTYKIT_LOGIN` token from repo secrets.
-
-### Branch workflow
-
-- `main` — production. Every commit here auto-deploys.
-- `debug` — development playground. Has an in-app diagnostic overlay (Shift+D), an end-to-end WebSocket smoke script, and the preview launch config. See [DEBUG.md](DEBUG.md).
-
-Daily loop: work on `debug`, open a PR to `main`, watch CI, merge when green, deploy fires automatically.
+To deploy by hand: `npm run build && npx wrangler deploy` (after `npx wrangler login`).
 
 ## Quick rules reference
 
@@ -110,9 +94,9 @@ Longest Road (5+ connected) = 2 VP. Largest Army (3+ knights played) = 2 VP. Fir
 
 ## Credits
 
-Inspired by and originally forked from [Viral-Doshi/catan](https://github.com/Viral-Doshi/catan). The rules engine in `party/gameLogic.js` is ported near-verbatim from that project — huge thanks to [@doshi-viral](https://www.linkedin.com/in/doshi-viral/) for the Catan implementation.
+Inspired by and originally forked from [Viral-Doshi/catan](https://github.com/Viral-Doshi/catan). The rules engine in `shared/gameLogic.js` is ported from that project — huge thanks to [@doshi-viral](https://www.linkedin.com/in/doshi-viral/) for the Catan implementation.
 
-Everything else — the Preact frontend, the PartyKit migration, the PWA shell, the design system, the deploy pipeline — was rebuilt for this project.
+Everything else — the Preact frontend, the PartyServer/Cloudflare server, the PWA shell, the design system, the deploy pipeline — was rebuilt for this project.
 
 ## License
 

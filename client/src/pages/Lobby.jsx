@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useGameStore } from '../stores/gameStore';
 import { Button, Card, FactionStripe, PlayerAvatar } from '../components/ui';
 import { Icons } from '../components/ui/icons';
+import { factionForSeat } from '../lib/game-ui';
 
 /**
  * In-room, pre-start screen. Matches the "Multiplayer Lobby Var 1" mock at a
@@ -124,12 +125,11 @@ function SettingRow({ label, value }) {
   );
 }
 
-const FACTIONS = ['red', 'blue', 'gold', 'green'];
 
 function PlayerRow({ player, seatIndex, isYou, isHost }) {
   // seatIndex comes from the player's position in game.players[] — the server
   // doesn't stamp a seatIndex on the player object, so we derive it here.
-  const faction = FACTIONS[seatIndex ?? 0] ?? 'red';
+  const faction = factionForSeat(seatIndex);
   return (
     <div className="relative overflow-hidden rounded-xl bg-surface-low p-3 pl-5">
       <FactionStripe faction={faction} />

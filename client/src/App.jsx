@@ -16,7 +16,6 @@ import {
   upsertRecentRoom,
   clearActiveGame,
 } from './lib/cache';
-import './App.css';
 
 const SESSION_KEY = 'clubcatan:session';
 
@@ -59,6 +58,12 @@ function App() {
   const { client, status } = useRoom(session?.roomCode);
   const clientRef = useRef(null);
   useEffect(() => { clientRef.current = client; }, [client]);
+  // Dev-only escape hatch for poking the protocol from DevTools:
+  //   __cc.call('placeRoad', { edgeKey: 'e_0_0_0' })
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__cc = client ?? undefined;
+  }, [client]);
   const game = useGameStore((s) => s.game);
   const setGame = useGameStore((s) => s.setGame);
   const notifications = useGameStore((s) => s.notifications);
@@ -85,33 +90,40 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Once the socket opens, try to reconnect so the server binds our player id
-  // to the new connection. Skips if we don't have a playerId yet (fresh
-  // create/join flow — those use call('createGame')/call('joinGame') instead,
-  // which implicitly bind the connection).
+  // Once the socket opens, re-bind our identity on the server so it knows which
+  // seat (or spectator slot) this connection represents:
+  //   - players call `reconnect` with their stored playerId;
+  //   - spectators have no playerId, so they re-run `joinAsSpectator` (idempotent
+  //     on the server) — otherwise a reloaded spectator sat on the connecting
+  //     card forever.
+  // Skips when we have neither (fresh create/join flow — those use
+  // call('createGame')/call('joinGame') instead, which implicitly bind).
   //
-  // We also dedupe per (client, playerId) — the effect re-fires whenever
+  // We also dedupe per (client, identity) — the effect re-fires whenever
   // `session` changes, and after a successful create/join the session updates
   // from {playerId: null} to {playerId: real}, which would otherwise trigger
   // a needless second reconnect on the same connection.
   const reconnectKeyRef = useRef(null);
   useEffect(() => {
     if (!client || status !== 'open') return;
-    if (!session?.playerId) return;
-    const key = `${client.roomCode}:${session.playerId}`;
+    const asSpectator = !!session?.spectator && !session?.playerId;
+    if (!session?.playerId && !asSpectator) return;
+    const key = `${client.roomCode}:${asSpectator ? 'spectator' : session.playerId}`;
     if (reconnectKeyRef.current === key) return;
     reconnectKeyRef.current = key;
 
     let cancelled = false;
     (async () => {
       try {
-        const result = await client.call('reconnect', { playerId: session.playerId });
+        const result = asSpectator
+          ? await client.call('joinAsSpectator', { playerName: session.name })
+          : await client.call('reconnect', { playerId: session.playerId });
         if (cancelled) return;
         if (result?.gameState) setGame(result.gameState);
       } catch (err) {
         if (cancelled) return;
-        // The most common reason is server recycled the room (DO hibernation
-        // eviction, or dev-server restart). Either way, our session is stale.
+        // Most common reason: the room expired (7-day idle TTL) or the game
+        // was never created on this server. Either way, our session is stale.
         console.warn('[app] reconnect failed — clearing session', err?.message);
         await leaveRoom(session.roomCode);
         saveSession(null);

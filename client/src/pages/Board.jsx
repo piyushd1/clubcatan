@@ -6,6 +6,7 @@ import { Icons, ResourceIcons } from '../components/ui/icons';
 import { HexBoard } from '../components/board/HexBoard';
 import { TerrainHexBadge } from '../components/board/TerrainSymbol';
 import { isVertexOnEdge } from '../lib/hex-math';
+import { factionBgForSeat, factionForSeat, findWinner, shouldShowTradeDialog } from '../lib/game-ui';
 
 const RESOURCE_ORDER = ['brick', 'lumber', 'wool', 'grain', 'ore'];
 const RESOURCE_TINTS = {
@@ -32,7 +33,6 @@ const RESOURCE_SHORT = {
   grain: 'Hay',
   ore: 'Ore',
 };
-const FACTIONS = ['red', 'blue', 'gold', 'green'];
 
 export function Board({ roomCode, playerId, client, onLeave, spectator = false }) {
   const game = useGameStore((s) => s.game);
@@ -44,34 +44,36 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
 
   // Confirm Move (#7) — placements are PROVISIONAL on the client until Confirm.
   //
-  //   Setup phase:  pendingSetup = { vertex: vKey, edge: eKey }
-  //                 Taps update one or the other; Confirm fires
-  //                 placeSettlement → placeRoad → advanceSetup.
+  //   Setup phase:  pendingSetup = { vertex: vKey, edge: eKey } holds the
+  //                 player's provisional taps. Confirm fires placeSettlement,
+  //                 then placeRoad; the server records each step in
+  //                 `game.setupTurn` and advances the turn itself once the
+  //                 road lands. Whether the settlement is already committed
+  //                 is read from `game.setupTurn.settlement`, so a reload
+  //                 mid-setup still shows the owed road (and the user can't
+  //                 re-place the settlement while landing the road).
   //   Main phase:   pendingBuild = { kind: 'settlement'|'city'|'road', key }
   //                 One pending build at a time. Confirm fires the matching
   //                 server call. Dev-card / trade / end-turn paths still
   //                 fire immediately — only placements are two-step.
-  // pendingSetup holds the player's provisional setup placement. After the
-  // settlement commits server-side (but before the road does), we flip
-  // `settlementCommitted` so the user can't re-place the settlement while
-  // they're still trying to land the road. Without this flag, a failed road
-  // Confirm leaves the settlement on the server and the pending UI open,
-  // which is how the user accidentally placed 4 settlements + 1 road.
-  const [pendingSetup, setPendingSetup] = useState({
-    vertex: null,
-    edge: null,
-    settlementCommitted: false,
-  });
+  const [pendingSetup, setPendingSetup] = useState({ vertex: null, edge: null });
   const [pendingBuild, setPendingBuild] = useState(null);
 
+  // Server-side record of this setup turn. Non-null settlement means "placed,
+  // road still owed". Only meaningful while phase === 'setup'.
+  const committedSettlement = game?.phase === 'setup' ? game?.setupTurn?.settlement ?? null : null;
+  // The vertex the pending road must touch: the committed one if it exists,
+  // otherwise the provisional tap.
+  const setupAnchor = committedSettlement ?? pendingSetup.vertex;
+
   // Pre-validated at the client: during setup, the pending road must share a
-  // physical vertex with the pending (or committed) settlement. Drives the
+  // physical vertex with the (pending or committed) settlement. Drives the
   // Confirm button's enabled state.
   const setupAdjacencyOk = useMemo(() => {
-    const { vertex, edge } = pendingSetup;
-    if (!vertex || !edge) return false;
-    return isVertexOnEdge(vertex, edge);
-  }, [pendingSetup]);
+    const { edge } = pendingSetup;
+    if (!setupAnchor || !edge) return false;
+    return isVertexOnEdge(setupAnchor, edge);
+  }, [pendingSetup, setupAnchor]);
 
   // Steal chooser modal state: null | { hexKey, players: [{id,name,hasResources}] }
   const [stealChooser, setStealChooser] = useState(null);
@@ -99,7 +101,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   // Clear pending placements whenever turn ownership or phase flips so a
   // pending ghost doesn't leak into someone else's turn after end-turn.
   useEffect(() => {
-    setPendingSetup({ vertex: null, edge: null, settlementCommitted: false });
+    setPendingSetup({ vertex: null, edge: null });
     setPendingBuild(null);
   }, [phase, currentIndex, spectator]);
 
@@ -157,7 +159,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
       if (phase === 'setup') {
         // Once the settlement is locked in on the server, vertex taps become
         // no-ops — the user is in road-only mode.
-        if (pendingSetup.settlementCommitted) return;
+        if (committedSettlement) return;
         // Toggle: tap same vertex again to clear; tap different to replace.
         setPendingSetup((prev) =>
           prev.vertex === vKey ? { ...prev, vertex: null } : { ...prev, vertex: vKey }
@@ -183,7 +185,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
         );
       }
     },
-    [client, isMyTurn, phase, turnPhase, myIndex]
+    [client, isMyTurn, phase, turnPhase, myIndex, committedSettlement]
   );
 
   const onEdgeClick = useCallback(
@@ -207,31 +209,26 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
   // ---- Confirm + Reset ---------------------------------------------------
 
   const resetPending = useCallback(() => {
-    // Reset only clears pending that hasn't committed. Once the settlement
-    // is locked in, Reset keeps it (can't un-place) and just drops the
-    // pending road — the user is still owed a road placement.
-    setPendingSetup((prev) =>
-      prev.settlementCommitted
-        ? { ...prev, edge: null }
-        : { vertex: null, edge: null, settlementCommitted: false }
-    );
+    // Reset clears provisional taps only. A settlement already committed on
+    // the server can't be un-placed; the user still owes a road.
+    setPendingSetup({ vertex: null, edge: null });
     setPendingBuild(null);
   }, []);
 
   const confirmPlacement = useCallback(async () => {
     if (!client) return;
     if (phase === 'setup') {
-      const { vertex, edge, settlementCommitted } = pendingSetup;
-      if (!edge) {
-        pushNotification('Tap an adjacent edge for your road.');
-        return;
-      }
+      const { vertex, edge } = pendingSetup;
 
-      // Settlement already placed on a prior failed Confirm — skip straight
-      // to the road placement using the settlement's committed vertex.
-      if (settlementCommitted) {
+      // Step 1 — settlement (skipped if the server already has it, e.g. after
+      // a failed road Confirm or a reload mid-turn).
+      if (!committedSettlement) {
         if (!vertex) {
-          pushNotification('Settlement is already placed. Tap an edge, then Confirm.');
+          pushNotification('Tap a vertex for your settlement.');
+          return;
+        }
+        if (!edge) {
+          pushNotification('Tap an adjacent edge for your road.');
           return;
         }
         if (!isVertexOnEdge(vertex, edge)) {
@@ -239,53 +236,32 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
           return;
         }
         try {
-          await client.call('placeRoad', {
-            edgeKey: edge,
-            isSetup: true,
-            lastSettlement: vertex,
-          });
+          await client.call('placeSettlement', { vertexKey: vertex });
         } catch (err) {
-          pushNotification(err.message || 'Cannot place road there');
+          pushNotification(err.message || 'Cannot place settlement there');
           return;
         }
-        setPendingSetup({ vertex: null, edge: null, settlementCommitted: false });
-        try { await client.call('advanceSetup'); }
-        catch (err) { pushNotification(err.message || 'Could not advance'); }
+        // The gameState tick that follows carries setupTurn.settlement; from
+        // here on the committed vertex is the anchor, not the local tap.
+        setPendingSetup((prev) => ({ ...prev, vertex: null }));
+      } else if (!edge) {
+        pushNotification('Settlement is placed. Tap an adjacent edge, then Confirm.');
         return;
-      }
-
-      if (!vertex) {
-        pushNotification('Tap a vertex for your settlement.');
-        return;
-      }
-      if (!isVertexOnEdge(vertex, edge)) {
+      } else if (!isVertexOnEdge(committedSettlement, edge)) {
         pushNotification('Road must connect to your new settlement.');
         return;
       }
 
-      // Two-step commit. If the settlement lands but the road fails, lock
-      // the settlement in so the user can't accidentally place a second one
-      // by tapping a different vertex.
+      // Step 2 — road. The server validates adjacency against setupTurn and
+      // advances the turn itself when it lands.
       try {
-        await client.call('placeSettlement', { vertexKey: vertex });
+        await client.call('placeRoad', { edgeKey: edge });
       } catch (err) {
-        pushNotification(err.message || 'Cannot place settlement there');
-        return;
-      }
-      try {
-        await client.call('placeRoad', {
-          edgeKey: edge,
-          isSetup: true,
-          lastSettlement: vertex,
-        });
-      } catch (err) {
-        setPendingSetup({ vertex, edge: null, settlementCommitted: true });
+        setPendingSetup({ vertex: null, edge: null });
         pushNotification(err.message || 'Road didn’t land — tap an adjacent edge.');
         return;
       }
-      setPendingSetup({ vertex: null, edge: null, settlementCommitted: false });
-      try { await client.call('advanceSetup'); }
-      catch (err) { pushNotification(err.message || 'Could not advance'); }
+      setPendingSetup({ vertex: null, edge: null });
       return;
     }
     if (phase === 'playing' && pendingBuild) {
@@ -299,15 +275,15 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
         pushNotification(err.message || 'Cannot build');
       }
     }
-  }, [client, phase, pendingSetup, pendingBuild, pushNotification]);
+  }, [client, phase, pendingSetup, pendingBuild, committedSettlement, pushNotification]);
 
   // Composite object passed to HexBoard so it can draw ghost placements.
   const pendingForBoard = useMemo(() => {
     if (phase === 'setup') {
-      // If the settlement's already committed, its real render lives in the
-      // Building layer — skip the ghost so we don't draw it twice.
+      // A committed settlement renders for real in the Building layer; only
+      // the provisional tap gets a ghost.
       return {
-        vertex: pendingSetup.settlementCommitted ? null : pendingSetup.vertex,
+        vertex: committedSettlement ? null : pendingSetup.vertex,
         edge: pendingSetup.edge,
         vertexKind: 'settlement',
         ownerIndex: myIndex,
@@ -320,13 +296,12 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
       return { vertex: pendingBuild.key, vertexKind: pendingBuild.kind, ownerIndex: myIndex };
     }
     return null;
-  }, [phase, pendingSetup, pendingBuild, myIndex]);
+  }, [phase, pendingSetup, pendingBuild, myIndex, committedSettlement]);
 
-  // Confirm/Reset row shows whenever the user is mid-placement. Setup has
-  // an extra trigger: if the settlement committed but the road hasn't, we're
-  // still "in a pending state" — the user owes a road.
+  // Confirm/Reset row shows whenever the user is mid-placement. In setup, a
+  // committed settlement with no road yet also counts: the user owes a road.
   const hasPending = phase === 'setup'
-    ? !!(pendingSetup.vertex || pendingSetup.edge || pendingSetup.settlementCommitted)
+    ? !!(pendingSetup.vertex || pendingSetup.edge || (isMyTurn && committedSettlement))
     : !!pendingBuild;
 
   const onStealPicked = async (playerIdOrNull) => {
@@ -336,7 +311,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
     await doMoveRobber(hexKey, playerIdOrNull);
   };
 
-  const winner = phase === 'finished' ? players[game?.winner] : null;
+  const winner = phase === 'finished' ? findWinner(players, game?.winner) : null;
 
   return (
     <main className="relative min-h-dvh bg-surface pb-[calc(88px+env(safe-area-inset-bottom))]" style={{ touchAction: 'pan-y' }}>
@@ -388,6 +363,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
           turnPhase={turnPhase}
           isMyTurn={isMyTurn}
           pendingSetup={pendingSetup}
+          committedSettlement={committedSettlement}
           setupAdjacencyOk={setupAdjacencyOk}
           pendingBuild={pendingBuild}
           hasPending={hasPending}
@@ -427,7 +403,7 @@ export function Board({ roomCode, playerId, client, onLeave, spectator = false }
         />
       ) : null}
 
-      {game?.tradeOffer && game.tradeOffer.from !== myIndex ? (
+      {shouldShowTradeDialog(game?.tradeOffer, myIndex, playerId) ? (
         <IncomingTradeModal
           offer={game.tradeOffer}
           from={players[game.tradeOffer.from]}
@@ -529,6 +505,7 @@ function TurnCard({
   turnPhase,
   isMyTurn,
   pendingSetup,
+  committedSettlement,
   setupAdjacencyOk,
   pendingBuild,
   hasPending,
@@ -546,7 +523,8 @@ function TurnCard({
     'Expedition in Progress';
 
   const setupHasBoth = !!(pendingSetup?.vertex && pendingSetup?.edge);
-  const committed = !!pendingSetup?.settlementCommitted;
+  // Server says the settlement is already down; only the road is outstanding.
+  const committed = !!committedSettlement;
 
   let status;
   let warning = null;
@@ -1473,7 +1451,7 @@ function ResourcePickerModal({ title, body, onPick, onCancel }) {
 
 function StatusPanel({ game, me, playerId, currentIndex, onClose }) {
   const players = game?.players ?? [];
-  const winner = game?.winner != null ? players[game.winner] : null;
+  const winner = findWinner(players, game?.winner);
   const victoryTarget = game?.victoryPointsToWin ?? 10;
 
   // Public VP is authoritative during the game. Hidden VP dev cards only
@@ -1538,13 +1516,7 @@ function StatusPanel({ game, me, playerId, currentIndex, onClose }) {
 
 function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
   const vp = player.victoryPoints ?? 0;
-  const faction = FACTIONS[player.seat ?? 0] ?? 'red';
-  const factionClass = {
-    red: 'bg-faction-red',
-    blue: 'bg-faction-blue',
-    gold: 'bg-faction-gold',
-    green: 'bg-faction-green',
-  }[faction] ?? 'bg-outline';
+  const factionClass = factionBgForSeat(player.seat);
 
   // Resource / dev-card counts differ in shape between self (object/array)
   // and opponents (number). Normalize to a number for display.
@@ -1572,7 +1544,7 @@ function PlayerScoreRow({ player, rank, isMe, isCurrent, victoryTarget }) {
         isCurrent ? 'bg-surface-highest shadow-ambient' : 'bg-surface-low',
       ].join(' ')}
     >
-      <FactionStripe faction={faction} />
+      <FactionStripe faction={factionForSeat(player.seat)} />
       <div className="flex items-start gap-3">
         <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-extrabold text-on-primary ${factionClass}`}>
           {rank + 1}
@@ -1718,7 +1690,7 @@ function GameOverOverlay({ winner, players, myPlayerId, onLeave }) {
             <div key={p.id} className="flex items-center justify-between rounded-md bg-surface-low px-3 py-2">
               <span className="flex items-center gap-3">
                 <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-on-primary ${
-                  ['bg-faction-red','bg-faction-blue','bg-faction-gold','bg-faction-green'][i] ?? 'bg-outline'
+                  factionBgForSeat(i)
                 }`}>
                   {i + 1}
                 </span>
