@@ -299,9 +299,12 @@ function testSetupIntegrity() {
   {
     const game = setupGame();
     let turns = 0;
+    const secondSettlements = []; // [{ idx, v }] placed in setup round 2
     while (game.phase === 'setup' && turns < 20) {
       const me = current(game);
+      const idx = game.currentPlayerIndex;
       const v = freeSetupVertex(game, me.id);
+      if (game.setupPhase === 1) secondSettlements.push({ idx, v });
       GameLogic.placeSettlement(game, me.id, v);
       const e = GameLogic.getVertexEdges(v).find((k) => game.edges[k] && !game.edges[k].road);
       GameLogic.placeRoad(game, me.id, e);
@@ -311,7 +314,16 @@ function testSetupIntegrity() {
     assert(game.phase === 'playing' && game.turnPhase === 'roll', 'game is in playing/roll');
     assert(game.setupTurn === null, 'setupTurn cleared after setup');
     assert(game.players.every((p) => p.settlements === 3 && p.roads === 13), 'everyone has 2 settlements + 2 roads');
-    assert(game.players.every((p) => total(p) > 0), 'second settlement paid out starting resources');
+    // Starting resources: exactly one card per resource-producing hex touching
+    // the SECOND settlement, nothing for the first. A settlement next to only
+    // the desert legitimately yields zero, so compare against the board rather
+    // than asserting "> 0".
+    assert(secondSettlements.length === 3, 'each player placed one second-round settlement');
+    for (const { idx, v } of secondSettlements) {
+      const expected = GameLogic.getVertexAdjacentHexes(game, v).filter((h) => h.resource).length;
+      const got = total(game.players[idx]);
+      assert(got === expected, `${game.players[idx].name} received ${got} starting card(s) for ${expected} producing hex(es) at ${v}`);
+    }
   }
 }
 
